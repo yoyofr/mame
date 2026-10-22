@@ -303,7 +303,13 @@ void es550x_device::vgm_init(u8 es5506_mode, int banks)
 	m_vgm_log = machine().vgm_logger().OpenDevice(VGMC_ES5506, clock());
 	m_vgm_log->SetProperty(0x00, es5506_mode);  // header bit 31: 0 = ES5505, 1 = ES5506
 	m_vgm_log->SetProperty(0x01, m_channels);
+	vgm_dump_roms_and_gains(banks);
+	// a capture restarted at run time needs the ROMs, the gains and the current register state again
+	machine().vgm_logger().AddRestartCallback([this, banks]() { vgm_dump_roms_and_gains(banks); vgm_dump_state(); });
+}
 
+void es550x_device::vgm_dump_roms_and_gains(int banks)
+{
 	optional_memory_region *const regions[4] = { &m_region0, &m_region1, &m_region2, &m_region3 };
 	for (int bank = 0; bank < banks; bank++)
 	{
@@ -335,6 +341,55 @@ void es550x_device::vgm_init(u8 es5506_mode, int banks)
 		const u8 raw[4] = { 0x00, u8(c), u8(g >> 8), u8(g & 0xff) };
 		m_vgm_log->WriteRaw(0xE3, raw, 4);
 	}
+}
+
+// ES5505: log every voice register as the host would read it back (page select, registers
+// 1..11 then CR), the filter history on the high page, ACT, and restore the current page.
+// Writing a register with its current value does not retrigger anything on this chip.
+void es5505_device::vgm_dump_state()
+{
+	if (!m_vgm_log->IsValid())
+		return;
+	m_stream->update();
+	for (int v = 0; v < 32; v++)
+	{
+		es550x_voice *voice = &m_voice[v];
+		m_vgm_log->Write(0x80, v, 0x0f * 2);
+		for (int reg = 1; reg <= 0x0b; reg++)
+			m_vgm_log->Write(0x80, reg_read_low(voice, reg), reg * 2);
+		m_vgm_log->Write(0x80, reg_read_low(voice, 0) & 0x0fff, 0);
+		m_vgm_log->Write(0x80, 0x20 | v, 0x0f * 2);
+		for (int reg = 1; reg <= 0x06; reg++)
+			m_vgm_log->Write(0x80, reg_read_high(voice, reg), reg * 2);
+	}
+	m_vgm_log->Write(0x80, m_active_voices, 0x0d * 2);
+	m_vgm_log->Write(0x80, m_current_page, 0x0f * 2);
+}
+
+// ES5506: same, 32-bit registers logged as two 16-bit halves (low page 1..12 then CR,
+// high page 1..12), then the current page
+void es5506_device::vgm_dump_state()
+{
+	if (!m_vgm_log->IsValid())
+		return;
+	m_stream->update();
+	auto log32 = [this](int reg, u32 value)
+	{
+		m_vgm_log->Write(0x80, value >> 16, reg * 4);
+		m_vgm_log->Write(0x80, value & 0xffff, reg * 4 + 2);
+	};
+	for (int v = 0; v < 32; v++)
+	{
+		es550x_voice *voice = &m_voice[v];
+		log32(0x0f, v);
+		for (int reg = 1; reg <= 0x0c; reg++)
+			log32(reg, reg_read_low(voice, reg));
+		log32(0, reg_read_low(voice, 0));
+		log32(0x0f, 0x20 | v);
+		for (int reg = 1; reg <= 0x0c; reg++)
+			log32(reg, reg_read_high(voice, reg));
+	}
+	log32(0x0f, m_current_page);
 }
 
 // log a host read of IRQV (IRQ acknowledge), command 0xD7 03

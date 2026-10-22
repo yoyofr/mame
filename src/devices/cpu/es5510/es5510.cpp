@@ -389,6 +389,54 @@ void es5510_device::vgm_log_halt(bool halted)
 	m_vgm_log->WriteRaw(0xD8, raw, 3);
 }
 
+// Log the ESP state the way the host loads it: instruction latch bytes (0x03..0x08) + write
+// select 0xC0 for each of the 160 instructions, GPR latch bytes (0x00..0x02) + write select
+// 0xA0 for the 192 general purpose registers, then the serial and RAM select controls.
+// The DRAM contents (delay lines) are not reproducible and not logged.
+void es5510_device::vgm_dump_state()
+{
+	if (!m_vgm_log->IsValid())
+		return;
+	auto host = [this](uint8_t reg, uint8_t data)
+	{
+		const uint8_t raw[3] = { 0x00, reg, data };
+		m_vgm_log->WriteRaw(0xD8, raw, 3);
+	};
+	for (int i = 0; i < 160; i++)
+	{
+		const uint64_t ins = instr[i];
+		for (int b = 0; b < 6; b++)
+			host(0x03 + b, uint8_t(ins >> (40 - 8 * b)));
+		host(0xc0, uint8_t(i));
+	}
+	for (int i = 0; i < 0xc0; i++)
+	{
+		const uint32_t g = uint32_t(gpr[i]) & 0xffffff;
+		host(0x00, uint8_t(g >> 16));
+		host(0x01, uint8_t(g >> 8));
+		host(0x02, uint8_t(g));
+		host(0xa0, uint8_t(i));
+	}
+	// special registers the host sets up (memory layout, signal format); MEMSIZ is written as the
+	// mask it was derived from, the MAC and flag registers are transient and not restored
+	auto special = [&](uint8_t reg, uint32_t value)
+	{
+		value &= 0xffffff;
+		host(0x00, uint8_t(value >> 16));
+		host(0x01, uint8_t(value >> 8));
+		host(0x02, uint8_t(value));
+		host(0xa0, reg);
+	};
+	special(244, (1u << memshift) - 1);   // MEMSIZ
+	special(245, dlength);
+	special(246, abase);
+	special(247, bbase);
+	special(248, dbase);
+	special(249, sigreg);
+	host(0x18, host_serial);
+	host(0x14, ram_sel ? 0x80 : 0x00);
+}
+
 void es5510_device::host_w(offs_t offset, uint8_t data)
 {
 #if VERBOSE

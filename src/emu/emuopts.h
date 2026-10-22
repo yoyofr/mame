@@ -63,6 +63,7 @@
 #define OPTION_AVIWRITE             "aviwrite"
 #define OPTION_WAVWRITE             "wavwrite"
 #define OPTION_VGMWRITE             "vgmwrite"
+#define OPTION_VGMPAUSE             "vgmpause"
 #define OPTION_SNAPNAME             "snapname"
 #define OPTION_SNAPSIZE             "snapsize"
 #define OPTION_SNAPVIEW             "snapview"
@@ -349,6 +350,7 @@ public:
 	const char *avi_write() const { return value(OPTION_AVIWRITE); }
 	const char *wav_write() const { return value(OPTION_WAVWRITE); }
 	const int vgm_write() const { return int_value(OPTION_VGMWRITE); }
+	bool vgm_pause() const { return bool_value(OPTION_VGMPAUSE); }
 	const char *snap_name() const { return value(OPTION_SNAPNAME); }
 	const char *snap_size() const { return value(OPTION_SNAPSIZE); }
 	const char *snap_view() const { return value(OPTION_SNAPVIEW); }

@@ -131,6 +131,7 @@ protected:
 	required_shared_ptr<uint16_t> m_irq_vectors;
 	optional_shared_ptr<uint16_t> m_input_sel;
 	optional_memory_bank_array<2> m_srmp7_esbank;
+	uint8_t m_srmp7_vgm_window = 0;   // last sample bank logged, for a restarted capture
 
 	required_device<gfxdecode_device> m_gfxdecode;
 	required_device<screen_device> m_screen;

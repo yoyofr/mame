@@ -116,6 +116,8 @@ protected:
 	void vgm_init(u8 es5506_mode, int banks);
 	void vgm_dump_space(int bank);
 	void vgm_log_irq_ack();
+	void vgm_dump_roms_and_gains(int banks);
+	virtual void vgm_dump_state() {}      // log the current register state (capture restarted at run time)
 
 	virtual void update_envelopes(es550x_voice *voice) = 0;
 	virtual void check_for_end_forward(es550x_voice *voice, u64 &accum) = 0;
@@ -209,6 +211,7 @@ private:
 	inline void reg_write_test(es550x_voice *voice, offs_t offset, u32 data);
 	inline u32 reg_read_low(es550x_voice *voice, offs_t offset);
 	inline u32 reg_read_high(es550x_voice *voice, offs_t offset);
+	virtual void vgm_dump_state() override;
 	inline u32 reg_read_test(es550x_voice *voice, offs_t offset);
 
 	memory_access<21, 1, -1, ENDIANNESS_BIG>::cache m_cache[4];
@@ -264,6 +267,7 @@ private:
 	inline void reg_write_test(es550x_voice *voice, offs_t offset, u16 data, u16 mem_mask);
 	inline u16 reg_read_low(es550x_voice *voice, offs_t offset);
 	inline u16 reg_read_high(es550x_voice *voice, offs_t offset);
+	virtual void vgm_dump_state() override;
 	inline u16 reg_read_test(es550x_voice *voice, offs_t offset);
 
 	memory_access<20, 1, -1, ENDIANNESS_BIG>::cache m_cache[2];

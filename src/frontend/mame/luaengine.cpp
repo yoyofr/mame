@@ -14,6 +14,7 @@
 #include "mame.h"
 #include "pluginopts.h"
 #include "ui/pluginopt.h"
+#include "vgmwrite.hpp"
 #include "ui/ui.h"
 
 #include "imagedev/cassette.h"
@@ -1463,6 +1464,12 @@ void lua_engine::initialize()
 			});
 	machine_type.set_function("logerror", [] (running_machine &m, char const *str) { m.logerror("[luaengine] %s\n", str); });
 	machine_type.set_function("side_effects_disabled", &running_machine::side_effects_disabled);
+	// VGM logging control (vgmwrite): toggle pauses or restarts the capture (next numbered file)
+	machine_type.set_function("vgm_toggle", [] (running_machine &m) { return m.vgm_logger().Toggle(); });
+	machine_type["vgm_enabled"] = sol::property([] (running_machine &m) { return m.vgm_logger().Enabled(); });
+	machine_type["vgm_active"] = sol::property([] (running_machine &m) { return m.vgm_logger().Active(); });
+	machine_type["vgm_file"] = sol::property([] (running_machine &m) { return m.vgm_logger().FileName(); });
+	machine_type["vgm_samples"] = sol::property([] (running_machine &m) { return m.vgm_logger().Samples(); });
 	machine_type["time"] = sol::property(&running_machine::time);
 	machine_type["system"] = sol::property(&running_machine::system);
 	machine_type["parameters"] = sol::property(&running_machine::parameters);

@@ -57,6 +57,7 @@ private:
 	required_memory_bank_array<3> m_cpubank;
 
 	uint32_t m_bankmask = 0;
+	float m_vgm_mb_gain[2] = { 1.0f, 1.0f };   // last MB87078 gains logged, for a restarted capture
 	uint32_t m_old_clock = ~0;
 
 	std::unique_ptr<offs_t[]> m_calculated_otisbank;
@@ -66,6 +67,7 @@ private:
 
 	void mb87078_gain_changed(offs_t offset, uint8_t data);
 	void vgm_log_gains(int side, float mb87078_gain);
+	void vgm_log_board_state();
 	void es5505_clock_changed(u32 data);
 
 	void en_es5505_bank_w(offs_t offset, uint16_t data);

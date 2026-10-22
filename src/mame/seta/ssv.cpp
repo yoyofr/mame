@@ -664,9 +664,10 @@ void ssv_state::srmp7_sound_bank_w(offs_t offset, uint16_t data, uint16_t mem_ma
 		m_srmp7_esbank[0]->set_entry(data & 1);
 		m_srmp7_esbank[1]->set_entry(data & 1);
 		// VGM logging: region window base in 1M word units (each bank entry is 2M words)
+		m_srmp7_vgm_window = uint8_t((data & 1) * 2);
 		for (uint8_t region = 2; region <= 3; region++)
 		{
-			const uint8_t raw[3] = { 0x01, region, uint8_t((data & 1) * 2) };
+			const uint8_t raw[3] = { 0x01, region, m_srmp7_vgm_window };
 			m_ensoniq->get_vgmlog_dev()->WriteRaw(0xD7, raw, 3);
 		}
 	}
@@ -2421,6 +2422,14 @@ void ssv_state::init_srmp7()
 	m_srmp7_esbank[1]->configure_entries(0, 2, memregion("ensoniq.3")->base(), 0x400000);
 	m_srmp7_esbank[0]->set_entry(0);
 	m_srmp7_esbank[1]->set_entry(0);
+	// VGM logging: a capture restarted at run time needs the current bank window
+	machine().vgm_logger().AddRestartCallback([this]() {
+		for (uint8_t region = 2; region <= 3; region++)
+		{
+			const uint8_t raw[3] = { 0x01, region, m_srmp7_vgm_window };
+			m_ensoniq->get_vgmlog_dev()->WriteRaw(0xD7, raw, 3);
+		}
+	});
 }
 
 

@@ -15,6 +15,7 @@
 #include <cstdint>
 #include "../../emu/emu.h"
 #include <wchar.h>
+#include <functional>
 
 class VGMLogger;
 
@@ -196,6 +197,14 @@ public:
 	VGMLogger(running_machine &machine);
 	void Start(void);
 	void Stop(void);
+	// run-time control (hotkey): pause closes the current files, resume opens the next numbered
+	// file set and asks the devices to log their current state again (restart callbacks)
+	bool Active(void) const { return _logging && ! _paused; }
+	bool Enabled(void) const { return _logging != 0; }
+	bool Toggle(void);
+	const std::string& FileName(void) const { return _fNameBase; }
+	uint32_t Samples(void) const;
+	void AddRestartCallback(std::function<void()> cb) { _restartCbs.push_back(std::move(cb)); }
 	VGMDeviceLog* OpenDevice(uint8_t chipType, int clock);
 	VGMDeviceLog* GetChip(uint8_t chipType, uint8_t instance);
 	static VGMDeviceLog* GetDummyChip(void);
@@ -207,6 +216,9 @@ private:
 	void Header_Clear(VGM_INF& vf);
 	void CloseFile(VGM_INF& vf);
 	void WriteDelay(VGM_INF& vf);
+	void NextFileName(void);
+	void PauseRuntime(void);
+	void ResumeRuntime(void);
 	uint8_t NES_RAMCheck(VGM_INF& vf, uint32_t datasize, uint32_t* value1, uint32_t* value2, const uint8_t* data);
 	
 	running_machine* _machine;
@@ -214,7 +226,13 @@ private:
 	TIMER_CALLBACK_MEMBER(timerCallack);
 
 	uint8_t _logging = 0x00;
+	bool _paused = false;
+	bool _restarting = false;   // devices are logging their state for a restarted capture: keep every init-time write
+	bool _pauseAtBoot = false;
+	std::string _gameName;
 	std::string _fNameBase;
+	std::vector<std::string> _fileNames;
+	std::vector<std::function<void()>> _restartCbs;
 	std::vector<VGM_INF> _files;
 	std::vector<VGMDeviceLog> _chips;
 	GD3_TAG _tag;

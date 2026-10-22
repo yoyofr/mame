@@ -194,23 +194,11 @@ void VGMLogger::Start(void)
 	const software_info* swinfo = (devimg != nullptr) ? devimg->software_entry() : nullptr;
 	
 	if (gamedrv)
-		_fNameBase = gamedrv->type.shortname();
+		_gameName = gamedrv->type.shortname();
 	else
-		_fNameBase = "vgmlog";
-	// one numbered name per session: <game>_00.vgm, then <game>_01.vgm if that exists, ...
-	for (unsigned int session = 0; session < 1000; session++)
-	{
-		char suffix[0x10];
-		snprintf(suffix, sizeof(suffix), "_%02u", session);
-		std::string probe = _fNameBase + suffix + ".vgm";
-		FILE* hProbe = fopen(probe.c_str(), "rb");
-		if (hProbe == nullptr)
-		{
-			_fNameBase += suffix;
-			break;
-		}
-		fclose(hProbe);
-	}
+		_gameName = "vgmlog";
+	NextFileName();
+	_pauseAtBoot = _machine->options().vgm_pause();
 	
 	_tag.fccGD3 = 0x20336447;	// 'Gd3 '
 	_tag.lngVersion = 0x100;
@@ -270,12 +258,137 @@ void VGMLogger::Start(void)
 	return;
 }
 
+// one numbered name per capture: <game>_00.vgm, then <game>_01.vgm if that exists, ...
+void VGMLogger::NextFileName(void)
+{
+	_fNameBase = _gameName;
+	for (unsigned int session = 0; session < 1000; session++)
+	{
+		char suffix[0x10];
+		snprintf(suffix, sizeof(suffix), "_%02u", session);
+		std::string probe = _gameName + suffix + ".vgm";
+		FILE* hProbe = fopen(probe.c_str(), "rb");
+		if (hProbe == nullptr)
+		{
+			_fNameBase += suffix;
+			break;
+		}
+		fclose(hProbe);
+	}
+}
+
+uint32_t VGMLogger::Samples(void) const
+{
+	if (_files.empty() || _files[0].hFile == nullptr)
+		return 0;
+	return _files[0].SmplsWrt + _files[0].EvtDelay;
+}
+
+bool VGMLogger::Toggle(void)
+{
+	if (! _logging)
+		return false;
+	if (_paused)
+		ResumeRuntime();
+	else
+		PauseRuntime();
+	return ! _paused;
+}
+
+// close the current capture; a file that never got past its header is deleted so that its
+// number is reused
+void VGMLogger::PauseRuntime(void)
+{
+	if (_paused)
+		return;
+	for (size_t i = 0; i < _files.size(); i++)
+	{
+		VGM_INF& vf = _files[i];
+		if (vf.hFile == nullptr)
+			continue;
+		if (! vf.WroteHeader && vf.SmplsWrt == 0)
+		{
+			fclose(vf.hFile);
+			vf.hFile = nullptr;
+			if (i < _fileNames.size())
+				remove(_fileNames[i].c_str());
+			print_info("VGM %02zX discarded (empty).\n", i);
+		}
+		else
+		{
+			CloseFile(vf);
+		}
+		vf.EvtDelay = 0;
+	}
+	_paused = true;
+	print_info("VGM logging paused.\n");
+}
+
+// open the next numbered file set with the headers of the previous one and let the devices
+// log their ROMs and their current register state (init-time commands, before the first delay)
+void VGMLogger::ResumeRuntime(void)
+{
+	if (! _paused)
+		return;
+	NextFileName();
+	for (size_t i = 0; i < _files.size(); i++)
+	{
+		VGM_INF& vf = _files[i];
+		std::string vgmName = _fNameBase;
+		if (i > 0)
+			vgmName += "_" + std::to_string(i);
+		vgmName += ".vgm";
+		print_info("Opening %s ...\t", vgmName.c_str());
+		vf.hFile = fopen(vgmName.c_str(), "wb");
+		if (vf.hFile == nullptr)
+		{
+			print_info("Failed to create the file!\n");
+			continue;
+		}
+		print_info("OK\n");
+		if (i < _fileNames.size())
+			_fileNames[i] = vgmName;
+		vf.BytesWrt = 0;
+		vf.SmplsWrt = 0;
+		vf.EvtDelay = 0;
+		vf.DataCount = 0;
+		vf.Commands.clear();
+		vf.NesMemEmpty = 0x01;
+		VGM_HEADER& vh = vf.header;
+		vh.lngEOFOffset = 0;
+		vh.lngGD3Offset = 0;
+		vh.lngTotalSamples = 0;
+		vh.lngLoopOffset = 0;
+		vh.lngLoopSamples = 0;
+#ifdef DYNAMIC_HEADER_SIZE
+		vf.WroteHeader = 0x00;
+#else
+		vf.WroteHeader = 0x01;
+#endif
+	}
+	_paused = false;
+	for (VGMDeviceLog& vc : _chips)
+		vc._hadWrite = 0x00;
+	_restarting = true;
+	for (auto& cb : _restartCbs)
+		cb();
+	_restarting = false;
+	print_info("VGM logging resumed: %s\n", _fNameBase.c_str());
+}
+
 void VGMLogger::Stop(void)
 {
 	//delete _timer;	_timer = nullptr;
 
 	if (! _logging)
 		return;
+	if (_paused)
+	{
+		_chips.clear();
+		_files.clear();
+		print_info("VGM stopped.\n");
+		return;
+	}
 	
 	// For all "dual" chips, make sure the first chip's instance is marked as "used".
 	// Else it will incorrectly remove its clock value.
@@ -509,6 +622,13 @@ TIMER_CALLBACK_MEMBER(VGMLogger::timerCallack)
 {
 	if (! _logging)
 		return;
+	if (_pauseAtBoot)
+	{
+		// -vgmpause: the capture started by the devices at boot is discarded, the hotkey starts the first one
+		_pauseAtBoot = false;
+		PauseRuntime();
+		return;
+	}
 	
 	for (VGM_INF& vf : _files)
 	{
@@ -856,6 +976,7 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 		{
 			print_info("OK\n");
 			_files.push_back(VGM_INF());
+			_fileNames.push_back(vgmName);
 			vfPtr = &_files.back();
 			vfPtr->hFile = hFile;
 			vfPtr->BytesWrt = 0;
@@ -2024,7 +2145,8 @@ void VGMDeviceLog::Write(uint8_t port, uint16_t r, uint8_t v)
 		
 		// most commands sent at time 0 come from soundchip_reset(),
 		// so I check if the command is "worth" being written
-		cm = 0x00;
+		// (a capture restarted at run time starts with the real chip state: keep it all)
+		cm = _vgmlog->_restarting ? 0x01 : 0x00;
 		switch(_chipType & 0x7F)
 		{
 		case VGMC_YM2203:

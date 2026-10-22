@@ -26,6 +26,7 @@ public:
 	// VGM logging: the ESP is logged through the ES5505/6 it is attached to (command 0xD8)
 	void set_vgm_log(VGMDeviceLog* log) { m_vgm_log = log; }
 	void vgm_log_halt(bool halted);
+	void vgm_dump_state();   // program, GPRs and control registers as host writes
 
 	int16_t ser_r(int offset);
 	void ser_w(int offset, int16_t data);
