@@ -1,0 +1,10 @@
+{
+	"plugin": {
+		"name": "vgmtime",
+		"description": "Shows the emulated time (VGM position) on screen",
+		"version": "0.0.1",
+		"author": "yoyofr",
+		"type": "plugin",
+		"start": "true"
+	}
+}
