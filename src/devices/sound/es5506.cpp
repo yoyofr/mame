@@ -83,6 +83,7 @@ Ensoniq OTIS - ES5505                                            Ensoniq OTTO - 
 ***********************************************************************************************/
 
 #include "emu.h"
+#include "vgmwrite.hpp"
 #include "es5506.h"
 #include <algorithm>
 
@@ -153,6 +154,7 @@ es550x_device::es550x_device(const machine_config &mconfig, device_type type, co
 	, device_sound_interface(mconfig, *this)
 	, device_memory_interface(mconfig, *this)
 	, m_stream(nullptr)
+	, m_vgm_log(VGMLogger::GetDummyChip())
 	, m_sample_rate(0)
 	, m_master_clock(0)
 	, m_address_acc_shift(0)
@@ -263,6 +265,9 @@ void es5506_device::device_start()
 	// initialize the rest of the structure
 	m_channels = channels;
 
+	// VGM logging (ES5506 mode, 4 sample banks)
+	vgm_init(0x01, 4);
+
 	// KT-76 assumes all voices are active on an ES5506 without setting them!
 	m_active_voices = 31;
 	m_sample_rate = m_master_clock / (16 * (m_active_voices + 1));
@@ -287,6 +292,85 @@ void es5506_device::device_start()
 	save_item(STRUCT_MEMBER(m_voice, filtcount));
 
 	// success
+}
+
+//-------------------------------------------------
+//  VGM logging helpers
+//-------------------------------------------------
+
+void es550x_device::vgm_init(u8 es5506_mode, int banks)
+{
+	m_vgm_log = machine().vgm_logger().OpenDevice(VGMC_ES5506, clock());
+	m_vgm_log->SetProperty(0x00, es5506_mode);  // header bit 31: 0 = ES5505, 1 = ES5506
+	m_vgm_log->SetProperty(0x01, m_channels);
+
+	optional_memory_region *const regions[4] = { &m_region0, &m_region1, &m_region2, &m_region3 };
+	for (int bank = 0; bank < banks; bank++)
+	{
+		// prefer the full region (banked windows are expressed with the region window command),
+		// fall back to the contents of a driver-supplied address map
+		if (*regions[bank])
+			vgm_dump_rom(bank, regions[bank]->target());
+		else if (has_configured_map(bank))
+			vgm_dump_space(bank);
+	}
+
+	// mixer gains of the driver's sound routes (command 0xE3, 8.8 fixed point), so that the VGM
+	// reproduces the levels of the MAME mix; outputs the driver does not route are silent
+	const int outputs = std::min(m_channels * 2, 12);
+	float gains[12] = { 0 };
+	for (const sound_route &route : routes())
+	{
+		if (route.m_output == ALL_OUTPUTS)
+		{
+			for (int c = 0; c < outputs; c++)
+				gains[c] = std::max(gains[c], route.m_gain);
+		}
+		else if (route.m_output < u32(outputs))
+			gains[route.m_output] = std::max(gains[route.m_output], route.m_gain);
+	}
+	for (int c = 0; c < outputs; c++)
+	{
+		const u16 g = u16(std::min(gains[c] * 256.0f, 65535.0f) + 0.5f);
+		const u8 raw[4] = { 0x00, u8(c), u8(g >> 8), u8(g & 0xff) };
+		m_vgm_log->WriteRaw(0xE3, raw, 4);
+	}
+}
+
+// log a host read of IRQV (IRQ acknowledge), command 0xD7 03
+void es550x_device::vgm_log_irq_ack()
+{
+	static const u8 raw[3] = { 0x03, 0x00, 0x00 };
+	m_vgm_log->WriteRaw(0xD7, raw, 3);
+}
+
+// dump a memory region as VGM sample ROM for the given bank (ROM data block 0x90, bank in bits 28-29 of the start address)
+void es550x_device::vgm_dump_rom(int bank, memory_region *region)
+{
+	if (region == nullptr)
+		return;
+	m_vgm_log->DumpSampleROM(bank & 3, region);
+}
+
+// dump the contents of a bank address space, if it maps to one contiguous block of memory
+void es550x_device::vgm_dump_space(int bank)
+{
+	if (!m_vgm_log->IsValid())
+		return;
+
+	address_space &sp = space(bank);
+	const offs_t words = sp.addrmask() + 1;   // word addressing (address shift -1)
+	const u8 *ptr_first = static_cast<const u8 *>(sp.get_read_ptr(0));
+	const u8 *ptr_last = static_cast<const u8 *>(sp.get_read_ptr(sp.addrmask()));
+	if (ptr_first != nullptr && ptr_last != nullptr && static_cast<offs_t>(ptr_last - ptr_first) == (sp.addrmask() * 2))
+	{
+		logerror("VGM: dumping bank %d address space (0x%X bytes)\n", bank, words * 2);
+		m_vgm_log->WriteLargeData(bank & 3, words * 2, 0, 0, ptr_first);
+	}
+	else
+	{
+		logerror("VGM: bank %d address space is not contiguous memory, driver must dump the sample ROM itself\n", bank);
+	}
 }
 
 //-------------------------------------------------
@@ -384,6 +468,9 @@ void es5505_device::device_start()
 
 	// initialize the rest of the structure
 	m_channels = channels;
+
+	// VGM logging (ES5505 mode, 2 sample banks)
+	vgm_init(0x00, 2);
 
 	// 20 bit integer and 9 bit fraction
 	get_accum_mask(ADDRESS_INTEGER_BIT_ES5505, ADDRESS_FRAC_BIT_ES5505);
@@ -1333,6 +1420,14 @@ void es5506_device::write(offs_t offset, u8 data)
 	// accumulate the data
 	m_write_latch = (m_write_latch & ~(0xff000000 >> shift)) | (data << (24 - shift));
 
+	// VGM logging: log the 32-bit register write as two 16-bit writes (command 0xD6 aa ddee,
+	// big endian, i.e. byte lanes aa|0 and aa|1 of register (aa / 4) of the current page)
+	if (offset & 1)
+	{
+		const u16 logdata = (offset & 2) ? (m_write_latch & 0xffff) : (m_write_latch >> 16);
+		m_vgm_log->Write(0x80, logdata, (offset & 0x3e));
+	}
+
 	// wait for a write to complete
 	if (shift != 24)
 		return;
@@ -1426,7 +1521,10 @@ inline u32 es5506_device::reg_read_low(es550x_voice *voice, offs_t offset)
 		case 0x70/8:    // IRQV
 			result = m_irqv;
 			if (!machine().side_effects_disabled())
+			{
 				update_internal_irq_state();
+				vgm_log_irq_ack();
+			}
 			break;
 
 		case 0x78/8:    // PAGE
@@ -1503,7 +1601,10 @@ inline u32 es5506_device::reg_read_high(es550x_voice *voice, offs_t offset)
 		case 0x70/8:    // IRQV
 			result = m_irqv;
 			if (!machine().side_effects_disabled())
+			{
 				update_internal_irq_state();
+				vgm_log_irq_ack();
+			}
 			break;
 
 		case 0x78/8:    // PAGE
@@ -1854,6 +1955,14 @@ void es5505_device::write(offs_t offset, u16 data, u16 mem_mask)
 
 //  logerror("%s:ES5505 write %02x/%02x = %04x & %04x\n", machine().describe_context(), m_current_page, offset, data, mem_mask);
 
+	// VGM logging: 16-bit registers, byte lanes map to even (high byte) / odd (low byte) offsets
+	if (ACCESSING_BITS_0_7 && ACCESSING_BITS_8_15)
+		m_vgm_log->Write(0x80, data, (offset & 0x1f) * 2);
+	else if (ACCESSING_BITS_8_15)
+		m_vgm_log->Write(0x00, (offset & 0x1f) * 2 + 0, (data >> 8) & 0xff);
+	else if (ACCESSING_BITS_0_7)
+		m_vgm_log->Write(0x00, (offset & 0x1f) * 2 + 1, data & 0xff);
+
 	// force an update
 	m_stream->update();
 
@@ -1938,7 +2047,10 @@ inline u16 es5505_device::reg_read_low(es550x_voice *voice, offs_t offset)
 		case 0x0e:  // IRQV
 			result = m_irqv;
 			if (!machine().side_effects_disabled())
+			{
 				update_internal_irq_state();
+				vgm_log_irq_ack();
+			}
 			break;
 
 		case 0x0f:  // PAGE
@@ -2009,7 +2121,10 @@ inline u16 es5505_device::reg_read_high(es550x_voice *voice, offs_t offset)
 		case 0x0e:  // IRQV
 			result = m_irqv;
 			if (!machine().side_effects_disabled())
+			{
 				update_internal_irq_state();
+				vgm_log_irq_ack();
+			}
 			break;
 
 		case 0x0f:  // PAGE
@@ -2053,7 +2168,10 @@ inline u16 es5505_device::reg_read_test(es550x_voice *voice, offs_t offset)
 		case 0x0e:  // IRQV
 			result = m_irqv;
 			if (!machine().side_effects_disabled())
+			{
 				update_internal_irq_state();
+				vgm_log_irq_ack();
+			}
 			break;
 
 		case 0x0f:  // PAGE

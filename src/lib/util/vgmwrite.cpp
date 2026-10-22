@@ -197,7 +197,20 @@ void VGMLogger::Start(void)
 		_fNameBase = gamedrv->type.shortname();
 	else
 		_fNameBase = "vgmlog";
-	_fNameBase += "_";
+	// one numbered name per session: <game>_00.vgm, then <game>_01.vgm if that exists, ...
+	for (unsigned int session = 0; session < 1000; session++)
+	{
+		char suffix[0x10];
+		snprintf(suffix, sizeof(suffix), "_%02u", session);
+		std::string probe = _fNameBase + suffix + ".vgm";
+		FILE* hProbe = fopen(probe.c_str(), "rb");
+		if (hProbe == nullptr)
+		{
+			_fNameBase += suffix;
+			break;
+		}
+		fclose(hProbe);
+	}
 	
 	_tag.fccGD3 = 0x20336447;	// 'Gd3 '
 	_tag.lngVersion = 0x100;
@@ -571,9 +584,8 @@ void VGMLogger::Header_PostWrite(VGM_INF& vf)
 		}
 		vf.BytesWrt += 0x07 + (blkSize & 0x7FFFFFFF);
 	}
-	for (curcmd = 0x00; curcmd < vf.CmdCount; curcmd ++)
+	for (const VGM_INIT_CMD& vicmd : vf.Commands)
 	{
-		VGM_INIT_CMD& vicmd = vf.Commands[curcmd];
 		fwrite(vicmd.Data, 0x01, vicmd.CmdLen, vf.hFile);
 		vf.BytesWrt += vicmd.CmdLen;
 	}
@@ -636,9 +648,7 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 	if (_logging != 0xDD)
 	{
 		// prevent it from logging chips with known audible errors in VGM logs
-		if (chipType == VGMC_ES5506)
-			return &dummyDevice;	// logging needs to be reworked for this one
-		else if (chipType == VGMC_SCSP)
+		if (chipType == VGMC_SCSP)
 			return &dummyDevice;	// timing is horribly off (see Fighting Vipers)
 	}
 	
@@ -834,8 +844,11 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 	if (vfPtr == nullptr)	// no file found?
 	{
 		// try to create a new one
-		std::string vgmName(_fNameBase.length() + 0x10, '\0');
-		snprintf(&vgmName[0], vgmName.size(), "%s%zX.vgm", _fNameBase.c_str(), _files.size());
+		// first file of the session: <game>_NN.vgm, further files (chips that need their own file): <game>_NN_1.vgm, ...
+		std::string vgmName = _fNameBase;
+		if (! _files.empty())
+			vgmName += "_" + std::to_string(_files.size());
+		vgmName += ".vgm";
 		
 		print_info("Opening %s ...\t", vgmName.c_str());
 		FILE* hFile = fopen(vgmName.c_str(), "wb");
@@ -1073,7 +1086,6 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 	case VGMC_VSU:
 	case VGMC_SAA1099:
 	case VGMC_ES5503:
-	case VGMC_ES5506:
 	case VGMC_X1_010:
 	case VGMC_C352:
 		Header_SizeCheck(*vfPtr, 0x171, 0xE0);
@@ -1081,6 +1093,7 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 	case VGMC_GA20:
 		Header_SizeCheck(*vfPtr, 0x171, 0x100);
 		break;
+	case VGMC_ES5506:	// ES55xx extension (0xBE/0xD6/0xD7/0xD8/0xE3, ROM block regions): VGM 1.72
 	case VGMC_MIKEY:
 	case VGMC_K007232:
 	case VGMC_K005289:
@@ -2029,11 +2042,45 @@ void VGMDeviceLog::Write(uint8_t port, uint16_t r, uint8_t v)
 			break;
 		}
 		
-		if (cm && vf.CmdCount < 0x100)
-		{
-			vf.Commands[vf.CmdCount] = wrtCmd;
-			vf.CmdCount ++;
-		}
+		if (cm)
+			vf.Commands.push_back(wrtCmd);
+		return;
+	}
+	
+	fwrite(wrtCmd.Data, 0x01, wrtCmd.CmdLen, vf.hFile);
+	vf.BytesWrt += wrtCmd.CmdLen;
+	
+	return;
+}
+
+void VGMDeviceLog::WriteRaw(uint8_t opcode, const uint8_t* data, uint8_t dataLen)
+{
+	// Generic command writer for the extension opcodes (0xD7/0xD8/0xE2/0xE3 ...).
+	// The first data byte carries the chip-select bit (bit 7) for dual-chip logs.
+	if (_vgmlog == nullptr || ! _vgmlog->_logging)
+		return;
+	if (dataLen == 0 || dataLen + 1 > sizeof(VGMLogger::VGM_INIT_CMD::Data))
+		return;
+	
+	VGMLogger::VGM_INF& vf = _vgmlog->_files[_fileID];
+	if (vf.hFile == nullptr)
+		return;
+	
+	if (! _hadWrite)
+		_hadWrite = 0x01;
+	
+	VGMLogger::VGM_INIT_CMD wrtCmd;
+	wrtCmd.Data[0x00] = opcode;
+	memcpy(&wrtCmd.Data[0x01], data, dataLen);
+	wrtCmd.Data[0x01] |= (_chipType & 0x80);
+	wrtCmd.CmdLen = 0x01 + dataLen;
+	
+	_vgmlog->WriteDelay(vf);
+	
+	if (! vf.WroteHeader)
+	{
+		// extension commands sent at time 0 are configuration (routing, banking, ESP program) - always keep them
+		vf.Commands.push_back(wrtCmd);
 		return;
 	}
 	

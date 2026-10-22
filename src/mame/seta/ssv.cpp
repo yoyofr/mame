@@ -164,6 +164,7 @@ Notes:
 ***************************************************************************/
 
 #include "emu.h"
+#include "vgmwrite.hpp"
 #include "ssv.h"
 
 #include "mahjong.h"
@@ -662,6 +663,12 @@ void ssv_state::srmp7_sound_bank_w(offs_t offset, uint16_t data, uint16_t mem_ma
 	{
 		m_srmp7_esbank[0]->set_entry(data & 1);
 		m_srmp7_esbank[1]->set_entry(data & 1);
+		// VGM logging: region window base in 1M word units (each bank entry is 2M words)
+		for (uint8_t region = 2; region <= 3; region++)
+		{
+			const uint8_t raw[3] = { 0x01, region, uint8_t((data & 1) * 2) };
+			m_ensoniq->get_vgmlog_dev()->WriteRaw(0xD7, raw, 3);
+		}
 	}
 //  popmessage("%04X",data);
 }

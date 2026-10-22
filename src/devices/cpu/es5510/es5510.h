@@ -23,6 +23,10 @@ public:
 	uint8_t host_r(address_space &space, offs_t offset);
 	void host_w(offs_t offset, uint8_t data);
 
+	// VGM logging: the ESP is logged through the ES5505/6 it is attached to (command 0xD8)
+	void set_vgm_log(VGMDeviceLog* log) { m_vgm_log = log; }
+	void vgm_log_halt(bool halted);
+
 	int16_t ser_r(int offset);
 	void ser_w(int offset, int16_t data);
 
@@ -140,6 +144,7 @@ protected:
 	void alu_operation_end();
 
 private:
+	VGMDeviceLog* m_vgm_log;
 	int icount;
 	bool halt_asserted;
 	uint8_t pc;

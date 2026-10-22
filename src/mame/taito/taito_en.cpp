@@ -15,6 +15,7 @@
 ****************************************************************************/
 
 #include "emu.h"
+#include "vgmwrite.hpp"
 #include "taito_en.h"
 #include <algorithm>
 
@@ -44,6 +45,10 @@ taito_en_device::taito_en_device(const machine_config &mconfig, const char *tag,
 
 void taito_en_device::device_start()
 {
+	// the ES5505 must be started first so that its VGM logger is available
+	if (!m_ensoniq->started())
+		throw device_missing_dependencies();
+
 	// assumes it can make an address mask with .length() - 1
 	assert(!(m_otisrom.length() & (m_otisrom.length() - 1)));
 
@@ -54,6 +59,22 @@ void taito_en_device::device_start()
 		m_cpubank[i]->configure_entries(0, max, &ROM[0x100000], 0x20000);
 
 	m_bankmask = ((m_otisrom.bytes()) / 0x200000) - 1;
+
+	// VGM logging: both ES5505 banks are mapped to the same (voice-banked) sample ROM,
+	// dump it once and alias region 1 to region 0 (command 0xD7 02)
+	m_ensoniq->vgm_dump_rom(0, memregion("ensoniq"));
+	{
+		static const uint8_t alias[3] = { 0x02, 0x01, 0x00 };
+		m_ensoniq->get_vgmlog_dev()->WriteRaw(0xD7, alias, 3);
+		// ESP: attached to this ES5505, Taito routing preset (pair 0 direct, pairs 1-3 -> ESP)
+		m_esp->set_vgm_log(m_ensoniq->get_vgmlog_dev());
+		static const uint8_t preset[3] = { 0x05, 0x00, 0x00 };
+		m_ensoniq->get_vgmlog_dev()->WriteRaw(0xD8, preset, 3);
+		m_esp->vgm_log_halt(true);
+		// initial mixer gains (MB87078 at unity until the sound CPU programs it)
+		vgm_log_gains(0, 1.0f);
+		vgm_log_gains(1, 1.0f);
+	}
 
 	// initialize precalculated ES5505 bank table
 	const size_t otisbank_size = m_otisbank.bytes() / 2;
@@ -91,6 +112,26 @@ void taito_en_device::en_es5505_bank_w(offs_t offset, uint16_t data)
 	// mask out unused bits
 	m_otisbank[offset] = data;
 	m_calculated_otisbank[offset] = (m_otisbank[offset] & m_bankmask) << 20;
+
+	// VGM logging: per-voice external bank (register 0x40+voice, bank in units of 1M words)
+	m_ensoniq->get_vgmlog_dev()->Write(0x00, 0x40 | (offset & 0x1f), m_otisbank[offset] & m_bankmask);
+}
+
+// VGM logging: the total gain of one side (0 = left, 1 = right) of the audio path, command 0xE3.
+// It combines the MB87078 volume with the fixed mixer routes of the board
+// (ES5505 outputs -> pump at 0.18, pump (ESP and aux) outputs -> mixer at 0.5).
+void taito_en_device::vgm_log_gains(int side, float mb87078_gain)
+{
+	auto log_gain = [this](uint8_t channel, float gain)
+	{
+		const uint16_t g = uint16_t(std::min(gain * 256.0f, 65535.0f) + 0.5f);
+		const uint8_t raw[4] = { 0x00, channel, uint8_t(g >> 8), uint8_t(g) };
+		m_ensoniq->get_vgmlog_dev()->WriteRaw(0xE3, raw, 4);
+	};
+	for (int i = 0; i < 4; i++)
+		log_gain(side | (i * 2), mb87078_gain * 0.18f);	// ES5505 output channel gain
+	log_gain(0x10 + side, mb87078_gain * 0.5f);	// ESP output L/R
+	log_gain(0x12 + side, mb87078_gain * 0.5f);	// aux (direct) mix L/R
 }
 
 void taito_en_device::en_volume_w(offs_t offset, uint8_t data)
@@ -155,6 +196,8 @@ void taito_en_device::mb87078_gain_changed(offs_t offset, uint8_t data)
 
 		for (int i = 0; i < 2; i++)
 			m_pump->set_output_gain((offset & 1) | (i * 2), data / 32.0);
+
+		vgm_log_gains(offset & 1, data / 32.0);
 	}
 }
 
@@ -201,6 +244,7 @@ void taito_en_device::duart_output(uint8_t data)
 		{
 			logerror("Asserting ESPHALT\n");
 			m_pump->set_esp_halted(true);
+			m_esp->vgm_log_halt(true);
 		}
 	}
 	else
@@ -209,6 +253,7 @@ void taito_en_device::duart_output(uint8_t data)
 		{
 			logerror("Clearing ESPHALT\n");
 			m_pump->set_esp_halted(false);
+			m_esp->vgm_log_halt(false);
 		}
 	}
 }

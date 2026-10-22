@@ -65,6 +65,7 @@ private:
 	void duart_output(uint8_t data);
 
 	void mb87078_gain_changed(offs_t offset, uint8_t data);
+	void vgm_log_gains(int side, float mb87078_gain);
 	void es5505_clock_changed(u32 data);
 
 	void en_es5505_bank_w(offs_t offset, uint16_t data);

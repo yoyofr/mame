@@ -25,6 +25,10 @@ public:
 
 	u32 get_voice_index() { return m_voice_index; }
 
+	// VGM logging helpers (for drivers that implement sample ROM banking themselves)
+	VGMDeviceLog* get_vgmlog_dev() const { return m_vgm_log; }
+	void vgm_dump_rom(int bank, memory_region *region);
+
 	auto irq_cb() { return m_irq_cb.bind(); }
 	auto read_port_cb() { return m_read_port_cb.bind(); }
 	auto sample_rate_changed() { return m_sample_rate_changed_cb.bind(); }
@@ -108,6 +112,11 @@ protected:
 
 	inline s32 interpolate(s32 sample1, s32 sample2, u64 accum);
 	inline void apply_filters(es550x_voice *voice, s32 &sample);
+	// VGM logging
+	void vgm_init(u8 es5506_mode, int banks);
+	void vgm_dump_space(int bank);
+	void vgm_log_irq_ack();
+
 	virtual void update_envelopes(es550x_voice *voice) = 0;
 	virtual void check_for_end_forward(es550x_voice *voice, u64 &accum) = 0;
 	virtual void check_for_end_reverse(es550x_voice *voice, u64 &accum) = 0;
@@ -121,6 +130,7 @@ protected:
 
 	// internal state
 	sound_stream *m_stream;               // which stream are we using
+	VGMDeviceLog *m_vgm_log;              // VGM logger device
 	int           m_sample_rate;          // current sample rate
 	u32           m_master_clock;         // master clock frequency
 	s8            m_address_acc_shift;    // right shift accumulator for generate integer address

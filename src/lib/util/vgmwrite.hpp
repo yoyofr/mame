@@ -35,6 +35,7 @@ public:
 	VGMDeviceLog();
 	bool IsValid(void) const;
 	void Write(uint8_t port, uint16_t r, uint8_t v);
+	void WriteRaw(uint8_t opcode, const uint8_t* data, uint8_t dataLen);	// raw command, data[0] bit 7 = chip select
 	void WriteLargeData(uint8_t type, uint32_t blockSize, uint32_t startOfs, uint32_t dataLen, const void* data);
 	void SetProperty(uint8_t attr, uint32_t data);
 	void DumpSampleROM(uint8_t type, memory_region* region);
@@ -186,8 +187,7 @@ private:
 		uint32_t DataCount;
 		VGM_ROM_DATA DataBlk[0x20];	// TODO: make std:.vector
 		//uint32_t CmdAlloc;
-		uint32_t CmdCount;
-		VGM_INIT_CMD Commands[0x100];	// TODO: make std:.vector
+		std::vector<VGM_INIT_CMD> Commands;
 		
 		uint8_t NesMemEmpty;
 		uint8_t NesMem[0x4000];

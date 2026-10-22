@@ -12,6 +12,7 @@
  ***************************************************************************************/
 
 #include "emu.h"
+#include "vgmwrite.hpp"
 #include "es5510.h"
 #include "es5510d.h"
 
@@ -121,6 +122,7 @@ inline static int32_t asl(int32_t value, int shift, uint8_t &flags) {
 // Initialize ESP to mostly zeroed, configured for 64k samples of delay line memory, running (not halted)
 es5510_device::es5510_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
 	: cpu_device(mconfig, ES5510, tag, owner, clock)
+	, m_vgm_log(VGMLogger::GetDummyChip())
 	, icount(0)
 	, halt_asserted(false)
 	, pc(0)
@@ -381,11 +383,21 @@ uint8_t es5510_device::host_r(address_space &space, offs_t offset)
 	return 0x00;
 }
 
+void es5510_device::vgm_log_halt(bool halted)
+{
+	const uint8_t raw[3] = { 0x01, 0x00, uint8_t(halted ? 1 : 0) };
+	m_vgm_log->WriteRaw(0xD8, raw, 3);
+}
+
 void es5510_device::host_w(offs_t offset, uint8_t data)
 {
 #if VERBOSE
 	static char buf[1024];
 #endif
+	{
+		const uint8_t raw[3] = { 0x00, uint8_t(offset & 0xff), data };
+		m_vgm_log->WriteRaw(0xD8, raw, 3);
+	}
 	switch (offset) {
 	case 0x00:
 		gpr_latch = (gpr_latch&0x00ffff) | ((data&0xff)<<16);
