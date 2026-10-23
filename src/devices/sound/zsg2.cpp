@@ -93,6 +93,7 @@ TODO:
 */
 
 #include "emu.h"
+#include "vgmwrite.hpp"
 #include "zsg2.h"
 
 #include <algorithm>
@@ -123,6 +124,7 @@ zsg2_device::zsg2_device(const machine_config &mconfig, const char *tag, device_
 	, m_mem_base(*this, DEVICE_SELF)
 	, m_read_address(0)
 	, m_ext_read_handler(*this, 0)
+	, m_vgm_log(VGMLogger::GetDummyChip())
 {
 }
 
@@ -184,6 +186,52 @@ void zsg2_device::device_start()
 	}
 
 	save_item(NAME(m_sample_count));
+
+	// VGM logging: register writes as command 0xE4, sample ROM as data block 0x97
+	m_vgm_log = machine().vgm_logger().OpenDevice(VGMC_ZSG2, clock());
+	m_vgm_log->DumpSampleROM(0, memregion(DEVICE_SELF));
+	// a capture restarted at run time needs the ROM and the current register state again
+	machine().vgm_logger().AddRestartCallback([this]() { m_vgm_log->DumpSampleROM(0, memregion(DEVICE_SELF)); vgm_dump_state(); });
+}
+
+// VGM logging: log the register image (restarted capture), then re-key the playing voices at their
+// current position (the ZSG-2 has no writable position: key on with the start address set to the
+// current block, then the real start address, volume and filter values are put back)
+void zsg2_device::vgm_dump_state()
+{
+	auto log_write = [this](uint16_t offset, uint16_t data)
+	{
+		const uint8_t raw[4] = { uint8_t((offset >> 8) & 3), uint8_t(offset & 0xff), uint8_t(data >> 8), uint8_t(data & 0xff) };
+		m_vgm_log->WriteRaw(0xE4, raw, 4);
+	};
+	for (int ch = 0; ch < 48; ch++)
+		for (int reg = 0; reg < 16; reg++)
+			log_write((ch << 4) | reg, m_chan[ch].v[reg]);
+	for (int reg = 0x08; reg < 0x20; reg++)
+	{
+		if (reg == 0x1c)
+			log_write(0x300 + reg, (m_read_address & 0x3fff) << 2);
+		else if (reg == 0x1d)
+			log_write(0x300 + reg, m_read_address >> 14);
+		else
+			log_write(0x300 + reg, m_reg[reg]);
+	}
+	for (int ch = 0; ch < 48; ch++)
+	{
+		const zchan &c = m_chan[ch];
+		if (!(c.status & STATUS_ACTIVE))
+			continue;
+		const uint32_t pos = (c.cur_pos + 1) & 0xffff;   // next block to fetch
+		log_write((ch << 4) | 0, uint16_t(((pos & 0xff) << 8) | (c.v[0] & 0xff)));
+		log_write((ch << 4) | 1, uint16_t((c.v[1] & 0xff00) | (pos >> 8)));
+		log_write(0x300 + (ch >> 4), uint16_t(1 << (ch & 15)));
+		log_write((ch << 4) | 0, c.v[0]);
+		log_write((ch << 4) | 1, c.v[1]);
+		log_write((ch << 4) | 0xb, c.vol);
+		log_write((ch << 4) | 0x9, c.output_cutoff);
+		if (c.vol_delta != 0x0400)   // key-on ramp speed overridden by register 0xF
+			log_write((ch << 4) | 0xf, c.v[0xf]);
+	}
 }
 
 //-------------------------------------------------
@@ -615,6 +663,12 @@ void zsg2_device::write(offs_t offset, uint16_t data, uint16_t mem_mask)
 	{
 		popmessage("ZSG2 write mask %04X, contact MAMEdev", mem_mask);
 		return;
+	}
+
+	// VGM logging: 0xE4 ss aa dddd, ss bits 0-1 = offset bits 8-9, aa = offset bits 0-7
+	{
+		const uint8_t raw[4] = { uint8_t((offset >> 8) & 3), uint8_t(offset & 0xff), uint8_t(data >> 8), uint8_t(data & 0xff) };
+		m_vgm_log->WriteRaw(0xE4, raw, 4);
 	}
 
 	m_stream->update();

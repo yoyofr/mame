@@ -9,6 +9,8 @@
 
 #pragma once
 
+class VGMDeviceLog;
+
 // ======================> zsg2_device
 
 class zsg2_device : public device_t,
@@ -23,6 +25,9 @@ public:
 	uint16_t read(offs_t offset, uint16_t mem_mask = ~0);
 	void write(offs_t offset, uint16_t data, uint16_t mem_mask = ~0);
 
+	// VGM logging (command 0xE4): the Taito Zoom board logs its DSP through this device
+	VGMDeviceLog* get_vgmlog_dev() const { return m_vgm_log; }
+
 protected:
 	// device-level overrides
 	virtual void device_start() override ATTR_COLD;
@@ -32,6 +37,9 @@ protected:
 	virtual void sound_stream_update(sound_stream &stream) override;
 
 private:
+	VGMDeviceLog* m_vgm_log;
+	void vgm_dump_state();
+
 	const uint16_t STATUS_ACTIVE = 0x8000;
 
 	// 16 registers per channel, 48 channels

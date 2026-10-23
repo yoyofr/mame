@@ -54,6 +54,17 @@ private:
 
 	uint8_t tms_ctrl_r();
 	void tms_ctrl_w(uint8_t data);
+	uint8_t tms_data_r();
+	void tms_data_w(uint8_t data);
+
+	// VGM logging (through the ZSG-2 device, command 0xE4)
+	struct vgm_dsp_write { uint64_t ticks; uint8_t sub; uint8_t data; };
+	std::vector<vgm_dsp_write> m_vgm_dsp_hist;   // DSP host writes and control lines since reset
+	uint16_t m_vgm_gain[2];
+	void vgm_log_raw(uint8_t sub, uint8_t aa, uint16_t data);
+	void vgm_log_dsp(uint8_t sub, uint8_t data);
+	void vgm_log_gains();
+	void vgm_dump_dsp();
 };
 
 DECLARE_DEVICE_TYPE(TAITO_ZOOM, taito_zoom_device)

@@ -142,8 +142,10 @@ public:
 		uint32_t lngHzMSM5232;
 		uint32_t lngHzBSMT2000;
 		uint32_t lngHzICS2115;
-		//uint8_t bytReserved[0x0C];
-	};	// -> 0x100 Bytes
+		
+		uint32_t lngHzZSG2;
+		uint8_t bytReserved2[0x0C];
+	};	// -> 0x110 Bytes
 	struct GD3_TAG
 	{
 		uint32_t fccGD3;
@@ -295,6 +297,8 @@ enum ChipTypes : uint8_t
 	VGMC_MSM5232	= 0x2D,
 	VGMC_BSMT2000	= 0x2E,
 	VGMC_ICS2115	= 0x2F,
+	// v1.73 extension (yoyofr)
+	VGMC_ZSG2		= 0x30,	// ZOOM ZSG-2 with the TMS57002 DSP of the Taito Zoom board
 };
 
 #endif // __VGMWRITE_HPP__

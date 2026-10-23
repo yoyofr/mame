@@ -594,6 +594,9 @@ void VGMLogger::Stop(void)
 			case VGMC_ICS2115:
 				vh.lngHzICS2115 &= clock_mask;
 				break;
+			case VGMC_ZSG2:
+				vh.lngHzZSG2 &= clock_mask;
+				break;
 			}
 		}
 		if (vc._pcmCache.CacheData != nullptr)
@@ -937,6 +940,9 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 		case VGMC_ICS2115:
 			chip_val = vh.lngHzICS2115;
 			break;
+		case VGMC_ZSG2:
+			chip_val = vh.lngHzZSG2;
+			break;
 		default:
 			return &dummyDevice;	// unknown chip - don't log
 		}
@@ -1157,6 +1163,9 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 	case VGMC_ICS2115:
 		vh.lngHzICS2115 = clock;
 		break;
+	case VGMC_ZSG2:
+		vh.lngHzZSG2 = clock;
+		break;
 	}
 	
 	switch(chipType & 0x7F)
@@ -1223,6 +1232,9 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 	case VGMC_BSMT2000:
 	case VGMC_ICS2115:
 		Header_SizeCheck(*vfPtr, 0x172, 0x100);
+		break;
+	case VGMC_ZSG2:	// ZSG-2 + TMS57002 extension (0xE4, ROM block 0x97): VGM 1.73, clock at 0x100
+		Header_SizeCheck(*vfPtr, 0x173, 0x110);
 		break;
 	}
 	
@@ -2497,6 +2509,9 @@ void VGMDeviceLog::WriteLargeData(uint8_t type, uint32_t blockSize, uint32_t sta
 			blkType = 0x93;	// Type: GA20 ROM Data
 			break;
 		}
+		break;
+	case VGMC_ZSG2:
+		blkType = 0x97;	// Type: ZSG-2 ROM Data
 		break;
 	case VGMC_MIKEY:
 		break;

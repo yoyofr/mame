@@ -29,8 +29,11 @@ TODO:
 ***************************************************************************/
 
 #include "emu.h"
+#include "vgmwrite.hpp"
 #include "taito_zm.h"
 #include "machine/intelfsh.h"
+
+#include <algorithm>
 
 /**************************************************************************/
 
@@ -58,12 +61,75 @@ taito_zoom_device::taito_zoom_device(const machine_config &mconfig, const char *
 
 void taito_zoom_device::device_start()
 {
+	// the ZSG-2 must be started first so that its VGM logger is available
+	if (!m_zsg2->started())
+		throw device_missing_dependencies();
+
 	m_snd_shared_ram = make_unique_clear<uint8_t[]>(0x100);
 
 	// register for savestates
 	save_item(NAME(m_reg_address));
 	save_item(NAME(m_tms_ctrl));
 	save_pointer(NAME(m_snd_shared_ram), 0x100);
+
+	// VGM logging: board mixer gains (the DSP output gain is unity until the sound CPU programs it)
+	m_vgm_gain[0] = m_vgm_gain[1] = 0x100;
+	vgm_log_gains();
+	machine().vgm_logger().AddRestartCallback([this]() { vgm_dump_dsp(); });
+}
+
+/***************************************************************************
+
+  VGM logging (command 0xE4 of the ZSG-2 device)
+
+***************************************************************************/
+
+void taito_zoom_device::vgm_log_raw(uint8_t sub, uint8_t aa, uint16_t data)
+{
+	const uint8_t raw[4] = { sub, aa, uint8_t(data >> 8), uint8_t(data & 0xff) };
+	m_zsg2->get_vgmlog_dev()->WriteRaw(0xE4, raw, 4);
+}
+
+// mixer gains (8.8 fixed point): ZSG-2 outputs -> DSP inputs (0.5, 0.5, 1.0, 1.0),
+// DSP output 2 -> left and 3 -> right scaled by the global volume (board registers 4/5)
+void taito_zoom_device::vgm_log_gains()
+{
+	vgm_log_raw(6, 0x00, 0x80);
+	vgm_log_raw(6, 0x01, 0x80);
+	vgm_log_raw(6, 0x02, 0x100);
+	vgm_log_raw(6, 0x03, 0x100);
+	vgm_log_raw(6, 0x12, m_vgm_gain[0]);
+	vgm_log_raw(6, 0x17, m_vgm_gain[1]);
+}
+
+// restarted capture: the DSP state is re-created by replaying every host write and control line change
+// since reset, with the sample periods the DSP ran in between as pre-runs (command 0xE4 sub 8). This is
+// exact (coefficient updates land where the running program reads them, LFO phases), which an upload of
+// the program and coefficient memory would not be.
+void taito_zoom_device::vgm_dump_dsp()
+{
+	uint64_t emitted = 0;
+	auto prerun_to = [this, &emitted](uint64_t ticks) {
+		while (ticks > emitted)
+		{
+			const uint64_t n = std::min<uint64_t>(ticks - emitted, 0xFFFFFF);
+			vgm_log_raw(8, uint8_t(n >> 16), uint16_t(n & 0xFFFF));
+			emitted += n;
+		}
+	};
+	for (const vgm_dsp_write &w : m_vgm_dsp_hist)
+	{
+		prerun_to(w.ticks);
+		vgm_log_raw(w.sub, 0, w.data);
+	}
+	prerun_to(m_tms57002->vgm_total_ticks());
+	vgm_log_gains();
+}
+
+void taito_zoom_device::vgm_log_dsp(uint8_t sub, uint8_t data)
+{
+	vgm_log_raw(sub, 0, data);
+	m_vgm_dsp_hist.push_back({ m_tms57002->vgm_total_ticks(), sub, data });
 }
 
 //-------------------------------------------------
@@ -76,6 +142,8 @@ void taito_zoom_device::device_reset()
 
 	m_zsg2->reset();
 	m_tms57002->reset();
+	vgm_log_raw(7, 0, 0);
+	m_vgm_dsp_hist.clear();
 }
 
 
@@ -105,10 +173,22 @@ void taito_zoom_device::tms_ctrl_w(uint8_t data)
 {
 	// According to the TMS57002 manual, reset should NOT be set low during the data transfer.
 	//m_tms57002->set_input_line(INPUT_LINE_RESET, data & 0x10 ? CLEAR_LINE : ASSERT_LINE);
+	vgm_log_dsp(5, data & 3);
 	m_tms57002->cload_w(data & 2);
 	m_tms57002->pload_w(data & 1);
 	// Other bits unknown (0x9F at most games)
 	m_tms_ctrl = data;
+}
+
+uint8_t taito_zoom_device::tms_data_r()
+{
+	return m_tms57002->data_r();
+}
+
+void taito_zoom_device::tms_data_w(uint8_t data)
+{
+	vgm_log_dsp(4, data);
+	m_tms57002->data_w(data);
 }
 
 void taito_zoom_device::taitozoom_mn_map(address_map &map)
@@ -120,7 +200,7 @@ void taito_zoom_device::taitozoom_mn_map(address_map &map)
 	}
 	map(0x400000, 0x41ffff).ram();
 	map(0x800000, 0x8007ff).rw(m_zsg2, FUNC(zsg2_device::read), FUNC(zsg2_device::write));
-	map(0xc00000, 0xc00000).rw(m_tms57002, FUNC(tms57002_device::data_r), FUNC(tms57002_device::data_w)); // TMS57002 comms
+	map(0xc00000, 0xc00000).rw(FUNC(taito_zoom_device::tms_data_r), FUNC(taito_zoom_device::tms_data_w)); // TMS57002 comms
 	map(0xe00000, 0xe000ff).rw(FUNC(taito_zoom_device::shared_ram_r), FUNC(taito_zoom_device::shared_ram_w)); // M66220FP for comms with maincpu
 }
 
@@ -157,6 +237,8 @@ void taito_zoom_device::reg_data_w(uint16_t data)
 			if (data & 0xc0c0)
 				popmessage("ZOOM gain L %04X, contact MAMEdev", data);
 			m_tms57002->set_output_gain(2, (data & 0x3f) / 63.0);
+			m_vgm_gain[0] = uint16_t((data & 0x3f) * 256 / 63.0 + 0.5);
+			vgm_log_raw(6, 0x12, m_vgm_gain[0]);
 			break;
 
 		case 0x05:
@@ -164,6 +246,8 @@ void taito_zoom_device::reg_data_w(uint16_t data)
 			if (data & 0xc0c0)
 				popmessage("ZOOM gain R %04X, contact MAMEdev", data);
 			m_tms57002->set_output_gain(3, (data & 0x3f) / 63.0);
+			m_vgm_gain[1] = uint16_t((data & 0x3f) * 256 / 63.0 + 0.5);
+			vgm_log_raw(6, 0x17, m_vgm_gain[1]);
 			break;
 
 		default:

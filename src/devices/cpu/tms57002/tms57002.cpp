@@ -23,7 +23,7 @@ void tms57002_device::internal_pgm(address_map &map)
 tms57002_device::tms57002_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
 	: cpu_device(mconfig, TMS57002, tag, owner, clock)
 	, device_sound_interface(mconfig, *this)
-	, macc(0), macc_read(0), macc_write(0), st0(0), st1(0), sti(0), txrd(0)
+	, macc(0), macc_read(0), macc_write(0), st0(0), st1(0), sti(0), txrd(0), m_vgm_ticks(0), m_vgm_total_ticks(0)
 	, m_dready_callback(*this)
 	, m_pc0_callback(*this)
 	, m_empty_callback(*this)
@@ -53,6 +53,8 @@ void tms57002_device::pload_w(int state)
 			ca = 0;
 			sti &= ~(SU_MASK);
 		}
+		else
+			m_vgm_ticks = 0;
 	}
 }
 
@@ -87,6 +89,8 @@ void tms57002_device::device_reset()
 	rptc_next = 0;
 	update_counter_tail = 0;
 	update_counter_head = 0;
+	m_vgm_ticks = 0;
+	m_vgm_total_ticks = 0;
 	st0 &= ~(ST0_INCS | ST0_DIRI | ST0_FI | ST0_SIM | ST0_PLRI |
 			ST0_PBCI | ST0_DIRO | ST0_FO | ST0_SOM | ST0_PLRO |
 			ST0_PBCO | ST0_CNS);
@@ -220,6 +224,8 @@ void tms57002_device::sync_w(int state)
 	if (sti & (IN_PLOAD /*| IN_CLOAD*/))
 		return;
 
+	m_vgm_ticks++;
+	m_vgm_total_ticks++;
 	allow_update = 1;
 	pc = 0;
 	ca = 0;

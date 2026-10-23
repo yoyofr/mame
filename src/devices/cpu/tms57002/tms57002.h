@@ -33,6 +33,14 @@ public:
 
 	void internal_pgm(address_map &map) ATTR_COLD;
 
+	// state access for the VGM logger (program, coefficients, status registers)
+	u32 vgm_st0() const { return st0; }
+	u32 vgm_st1() const { return st1; }
+	u32 vgm_cmem(u8 addr) const { return cmem[addr]; }
+	u32 vgm_pgm(u8 adr) { return program->read_dword(adr); }
+	u32 vgm_ticks() const { return m_vgm_ticks; }	// sample periods run since the program was last started (PLOAD released)
+	u64 vgm_total_ticks() const { return m_vgm_total_ticks; }	// sample periods run since reset
+
 protected:
 	virtual void device_start() override ATTR_COLD;
 	virtual void device_reset() override ATTR_COLD;
@@ -156,6 +164,8 @@ private:
 	address_space *program, *data;
 	int icount;
 	int unsupported_inst_warning;
+	u32 m_vgm_ticks;
+	u64 m_vgm_total_ticks;
 
 	void decode_error(u32 opcode);
 	void decode_cat1(u32 opcode, u16 *op, cstate *cs);
