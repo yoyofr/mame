@@ -1233,8 +1233,8 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 	case VGMC_ICS2115:
 		Header_SizeCheck(*vfPtr, 0x172, 0x100);
 		break;
-	case VGMC_ZSG2:	// ZSG-2 + TMS57002 extension (0xE4, ROM block 0x97): VGM 1.73, clock at 0x100
-		Header_SizeCheck(*vfPtr, 0x173, 0x110);
+	case VGMC_ZSG2:	// ZSG-2 + TMS57002 extension (0xE4, ROM block 0x97): VGM 1.72, header 0x110 with the clock at 0x100
+		Header_SizeCheck(*vfPtr, 0x172, 0x110);
 		break;
 	}
 	

@@ -297,7 +297,7 @@ enum ChipTypes : uint8_t
 	VGMC_MSM5232	= 0x2D,
 	VGMC_BSMT2000	= 0x2E,
 	VGMC_ICS2115	= 0x2F,
-	// v1.73 extension (yoyofr)
+	// v1.72 extension (yoyofr): header grown to 0x110
 	VGMC_ZSG2		= 0x30,	// ZOOM ZSG-2 with the TMS57002 DSP of the Taito Zoom board
 };
 
