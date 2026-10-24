@@ -199,6 +199,8 @@ void VGMLogger::Start(void)
 		_gameName = "vgmlog";
 	NextFileName();
 	_pauseAtBoot = _machine->options().vgm_pause();
+	if (! _pauseAtBoot)
+		WavStart();
 	
 	_tag.fccGD3 = 0x20336447;	// 'Gd3 '
 	_tag.lngVersion = 0x100;
@@ -277,6 +279,29 @@ void VGMLogger::NextFileName(void)
 	}
 }
 
+// -vgmwav: the final audio mix of the machine goes to <capture>.wav for the duration of the capture
+void VGMLogger::WavStart(void)
+{
+	if (! _machine->options().vgm_wav() || _wavRecording)
+		return;
+	if (_machine->sound().is_recording())
+	{
+		print_info("VGM: -wavwrite is active, no per-capture wav\n");
+		return;
+	}
+	std::string name = _fNameBase + ".wav";
+	_wavRecording = _machine->sound().start_recording(name);
+	print_info("VGM: audio capture %s %s\n", name.c_str(), _wavRecording ? "started" : "FAILED");
+}
+
+void VGMLogger::WavStop(void)
+{
+	if (! _wavRecording)
+		return;
+	_machine->sound().stop_recording();
+	_wavRecording = false;
+}
+
 uint32_t VGMLogger::Samples(void) const
 {
 	if (_files.empty() || _files[0].hFile == nullptr)
@@ -321,6 +346,7 @@ void VGMLogger::PauseRuntime(void)
 		vf.EvtDelay = 0;
 	}
 	_paused = true;
+	WavStop();
 	print_info("VGM logging paused.\n");
 }
 
@@ -331,6 +357,7 @@ void VGMLogger::ResumeRuntime(void)
 	if (! _paused)
 		return;
 	NextFileName();
+	WavStart();
 	for (size_t i = 0; i < _files.size(); i++)
 	{
 		VGM_INF& vf = _files[i];
@@ -382,6 +409,7 @@ void VGMLogger::Stop(void)
 
 	if (! _logging)
 		return;
+	WavStop();
 	if (_paused)
 	{
 		_chips.clear();

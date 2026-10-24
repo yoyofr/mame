@@ -80,6 +80,7 @@ const options_entry emu_options::s_option_entries[] =
 	{ OPTION_WAVWRITE,                                   nullptr,     core_options::option_type::PATH,       "optional filename to write a WAV file of the current session" },
 	{ OPTION_VGMWRITE,                                   "0",         core_options::option_type::INTEGER,    "enable to write a VGM of the current session (name is based on romname)" },
 	{ OPTION_VGMPAUSE,                                   "0",         core_options::option_type::BOOLEAN,    "start with VGM logging paused; the vgmtime plugin hotkey starts and stops captures" },
+	{ OPTION_VGMWAV,                                     "0",         core_options::option_type::BOOLEAN,    "also record the audio output of each VGM capture to <capture>.wav (same start/stop, same numbering)" },
 	{ OPTION_SNAPNAME,                                   "%g/%i",     core_options::option_type::STRING,     "override of the default snapshot/movie naming; %g == gamename, %i == index" },
 	{ OPTION_SNAPSIZE,                                   "auto",      core_options::option_type::STRING,     "specify snapshot/movie resolution (<width>x<height>) or 'auto' to use minimal size " },
 	{ OPTION_SNAPVIEW,                                   "auto",      core_options::option_type::STRING,     "snapshot/movie view - 'auto' for default, or 'native' for per-screen pixel-aspect views" },

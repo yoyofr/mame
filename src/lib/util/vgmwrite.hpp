@@ -219,6 +219,8 @@ private:
 	void CloseFile(VGM_INF& vf);
 	void WriteDelay(VGM_INF& vf);
 	void NextFileName(void);
+	void WavStart(void);   // -vgmwav: record the machine's audio output alongside the capture
+	void WavStop(void);
 	void PauseRuntime(void);
 	void ResumeRuntime(void);
 	uint8_t NES_RAMCheck(VGM_INF& vf, uint32_t datasize, uint32_t* value1, uint32_t* value2, const uint8_t* data);
@@ -231,6 +233,7 @@ private:
 	bool _paused = false;
 	bool _restarting = false;   // devices are logging their state for a restarted capture: keep every init-time write
 	bool _pauseAtBoot = false;
+	bool _wavRecording = false;
 	std::string _gameName;
 	std::string _fNameBase;
 	std::vector<std::string> _fileNames;
