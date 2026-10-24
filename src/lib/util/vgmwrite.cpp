@@ -689,10 +689,11 @@ void VGMLogger::Header_PostWrite(VGM_INF& vf)
 	for (curcmd = 0x00; curcmd < vf.DataCount; curcmd ++)
 	{
 		VGM_ROM_DATA& vrd = vf.DataBlk[curcmd];
-		uint32_t dataLen = vrd.dataSize & 0x7FFFFFFF;
+		uint32_t romSize = vrd.dataSize & 0x7FFFFFFF;
 		const void* data = vrd.data;
 		uint32_t blkSize = vrd.dataSize & 0x80000000;
-		uint32_t startOfs = 0x00;
+		uint32_t startOfs = vrd.startOfs;
+		uint32_t dataLen = vrd.dataLen ? vrd.dataLen : romSize - startOfs;
 		
 		PatchROMBlock(vrd.type, dataLen, data, startOfs, romPatchBuf, vh);
 		if (data != nullptr || dumpEmptyBlocks)
@@ -707,7 +708,7 @@ void VGMLogger::Header_PostWrite(VGM_INF& vf)
 		case 0xA0:
 			blkSize += 0x08;
 			fwrite(&blkSize, 0x04, 0x01, vf.hFile);		// Data Block Size
-			fwrite(&dataLen, 0x04, 0x01, vf.hFile);		// ROM Size
+			fwrite(&romSize, 0x04, 0x01, vf.hFile);		// ROM Size
 			startOfs |= (vrd.dstart_msb << 24);
 			fwrite(&startOfs, 0x04, 0x01, vf.hFile);	// Data Base Address
 			break;
@@ -2618,7 +2619,21 @@ void VGMDeviceLog::WriteLargeData(uint8_t type, uint32_t blockSize, uint32_t sta
 			vrd.type = blkType;
 			vrd.dstart_msb = dstart_msb;
 			vrd.dataSize = blockSize | ((_chipType & 0x80) << 24);
-			vrd.data = data;
+			vrd.startOfs = startOfs;
+			vrd.dataLen = dataLen;
+			vrd.copy.clear();
+			if (data != nullptr && dataLen != 0)
+			{
+				// an explicit buffer is usually a temporary of the caller (memory read through the chip,
+				// e.g. the ZSG-2 sample flash at a restarted capture): keep a copy until the header is written
+				const uint8_t* src = static_cast<const uint8_t*>(data);
+				vrd.copy.assign(src, src + dataLen);
+				vrd.data = vrd.copy.data();
+			}
+			else
+			{
+				vrd.data = data;
+			}
 		}
 		return;
 	}
@@ -2865,6 +2880,9 @@ void VGMLogger::ChangeROMData(uint32_t oldsize, const void* olddata, uint32_t ne
 				vrd.dataSize &= 0x80000000;	// keep "chip select" bit
 				vrd.dataSize |= newsize;
 				vrd.data = newdata;
+				vrd.startOfs = 0;
+				vrd.dataLen = 0;
+				vrd.copy.clear();
 			}
 		}
 	}

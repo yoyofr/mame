@@ -169,8 +169,11 @@ private:
 	{
 		uint8_t type;
 		uint8_t dstart_msb;
-		uint32_t dataSize;
+		uint32_t dataSize;	// ROM size (bit 31: chip select)
 		const void* data;
+		uint32_t startOfs = 0;	// part of the image written (dataLen 0: whole image from startOfs)
+		uint32_t dataLen = 0;
+		std::vector<uint8_t> copy;	// the caller's buffer when it is a temporary (device memory dump), kept until the header is written
 	};
 	struct VGM_INIT_CMD
 	{
