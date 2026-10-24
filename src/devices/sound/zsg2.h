@@ -38,7 +38,9 @@ protected:
 
 private:
 	VGMDeviceLog* m_vgm_log;
+	bool m_vgm_rom_pending = false;   // sample memory behind an external read handler (G-NET flash): dumped at the first key-on
 	void vgm_dump_state();
+	void vgm_dump_memory();
 
 	const uint16_t STATUS_ACTIVE = 0x8000;
 

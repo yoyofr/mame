@@ -187,11 +187,33 @@ void zsg2_device::device_start()
 
 	save_item(NAME(m_sample_count));
 
-	// VGM logging: register writes as command 0xE4, sample ROM as data block 0x97
+	// VGM logging: register writes as command 0xE4, sample ROM as data block 0x97. When the samples live
+	// behind an external read handler (Taito G-NET: flash memories programmed by the game at boot), the
+	// memory is dumped through it at the first key-on instead of the (empty) region.
 	m_vgm_log = machine().vgm_logger().OpenDevice(VGMC_ZSG2, clock());
-	m_vgm_log->DumpSampleROM(0, memregion(DEVICE_SELF));
-	// a capture restarted at run time needs the ROM and the current register state again
-	machine().vgm_logger().AddRestartCallback([this]() { m_vgm_log->DumpSampleROM(0, memregion(DEVICE_SELF)); vgm_dump_state(); });
+	if (m_ext_read_handler.isunset())
+		m_vgm_log->DumpSampleROM(0, memregion(DEVICE_SELF));
+	else
+		m_vgm_rom_pending = true;
+	// a capture restarted at run time needs the sample memory and the current register state again
+	machine().vgm_logger().AddRestartCallback([this]() { vgm_dump_memory(); vgm_dump_state(); });
+}
+
+// VGM logging: the sample memory as seen by the chip (region or external handler), data block 0x97
+void zsg2_device::vgm_dump_memory()
+{
+	m_vgm_rom_pending = false;
+	if (m_ext_read_handler.isunset())
+	{
+		m_vgm_log->DumpSampleROM(0, memregion(DEVICE_SELF));
+		return;
+	}
+	if (!m_vgm_log->IsValid())
+		return;
+	std::vector<uint32_t> mem(m_mem_blocks);
+	for (uint32_t i = 0; i < m_mem_blocks; i++)
+		mem[i] = little_endianize_int32(read_memory(i));
+	m_vgm_log->WriteLargeData(0, m_mem_blocks * 4, 0, m_mem_blocks * 4, mem.data());
 }
 
 // VGM logging: log the register image (restarted capture), then re-key the playing voices at their
@@ -666,6 +688,8 @@ void zsg2_device::write(offs_t offset, uint16_t data, uint16_t mem_mask)
 	}
 
 	// VGM logging: 0xE4 ss aa dddd, ss bits 0-1 = offset bits 8-9, aa = offset bits 0-7
+	if (m_vgm_rom_pending && offset >= 0x300 && offset <= 0x302 && data)
+		vgm_dump_memory();   // first key-on: the game has programmed its sample flashes by now
 	{
 		const uint8_t raw[4] = { uint8_t((offset >> 8) & 3), uint8_t(offset & 0xff), uint8_t(data >> 8), uint8_t(data & 0xff) };
 		m_vgm_log->WriteRaw(0xE4, raw, 4);
