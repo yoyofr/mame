@@ -27,6 +27,9 @@ public:
 
 	// VGM logging (command 0xE4): the Taito Zoom board logs its DSP through this device
 	VGMDeviceLog* get_vgmlog_dev() const { return m_vgm_log; }
+	// the sample memory behind the external read handler was written (flash programming): the
+	// range is dumped again at the next key-on
+	void vgm_memory_changed(uint32_t byte_start, uint32_t byte_length);
 
 protected:
 	// device-level overrides
@@ -39,6 +42,7 @@ protected:
 private:
 	VGMDeviceLog* m_vgm_log;
 	bool m_vgm_rom_pending = false;   // sample memory behind an external read handler (G-NET flash): dumped at the first key-on
+	uint32_t m_vgm_dirty_start = 0, m_vgm_dirty_end = 0;   // bytes of the sample memory changed since the last dump
 	void vgm_dump_state();
 	void vgm_dump_memory();
 

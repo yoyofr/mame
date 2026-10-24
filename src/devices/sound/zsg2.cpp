@@ -196,24 +196,49 @@ void zsg2_device::device_start()
 	else
 		m_vgm_rom_pending = true;
 	// a capture restarted at run time needs the sample memory and the current register state again
-	machine().vgm_logger().AddRestartCallback([this]() { vgm_dump_memory(); vgm_dump_state(); });
+	machine().vgm_logger().AddRestartCallback([this]() { m_vgm_rom_pending = true; vgm_dump_memory(); vgm_dump_state(); });
 }
 
-// VGM logging: the sample memory as seen by the chip (region or external handler), data block 0x97
+// VGM logging: the sample memory as seen by the chip (region or external handler), data block 0x97;
+// after the first dump only the range changed since the last one
 void zsg2_device::vgm_dump_memory()
 {
+	const bool full = m_vgm_rom_pending;
 	m_vgm_rom_pending = false;
 	if (m_ext_read_handler.isunset())
 	{
 		m_vgm_log->DumpSampleROM(0, memregion(DEVICE_SELF));
 		return;
 	}
-	if (!m_vgm_log->IsValid())
+	uint32_t first = 0, last = m_mem_blocks;   // blocks
+	if (!full)
+	{
+		if (m_vgm_dirty_end <= m_vgm_dirty_start)
+			return;
+		first = m_vgm_dirty_start / 4;
+		last = std::min<uint32_t>(m_mem_blocks, (m_vgm_dirty_end + 3) / 4);
+	}
+	m_vgm_dirty_start = m_vgm_dirty_end = 0;
+	if (!m_vgm_log->IsValid() || last <= first)
 		return;
-	std::vector<uint32_t> mem(m_mem_blocks);
-	for (uint32_t i = 0; i < m_mem_blocks; i++)
-		mem[i] = little_endianize_int32(read_memory(i));
-	m_vgm_log->WriteLargeData(0, m_mem_blocks * 4, 0, m_mem_blocks * 4, mem.data());
+	std::vector<uint32_t> mem(last - first);
+	for (uint32_t i = first; i < last; i++)
+		mem[i - first] = little_endianize_int32(read_memory(i));
+	m_vgm_log->WriteLargeData(0, m_mem_blocks * 4, first * 4, (last - first) * 4, mem.data());
+}
+
+void zsg2_device::vgm_memory_changed(uint32_t byte_start, uint32_t byte_length)
+{
+	if (m_vgm_dirty_end <= m_vgm_dirty_start)
+	{
+		m_vgm_dirty_start = byte_start;
+		m_vgm_dirty_end = byte_start + byte_length;
+	}
+	else
+	{
+		m_vgm_dirty_start = std::min(m_vgm_dirty_start, byte_start);
+		m_vgm_dirty_end = std::max(m_vgm_dirty_end, byte_start + byte_length);
+	}
 }
 
 // VGM logging: log the register image (restarted capture), then re-key the playing voices at their
@@ -688,8 +713,8 @@ void zsg2_device::write(offs_t offset, uint16_t data, uint16_t mem_mask)
 	}
 
 	// VGM logging: 0xE4 ss aa dddd, ss bits 0-1 = offset bits 8-9, aa = offset bits 0-7
-	if (m_vgm_rom_pending && offset >= 0x300 && offset <= 0x302 && data)
-		vgm_dump_memory();   // first key-on: the game has programmed its sample flashes by now
+	if ((m_vgm_rom_pending || m_vgm_dirty_end > m_vgm_dirty_start) && offset >= 0x300 && offset <= 0x302 && data)
+		vgm_dump_memory();   // key-on after the game (re)programmed its sample flashes
 	{
 		const uint8_t raw[4] = { uint8_t((offset >> 8) & 3), uint8_t(offset & 0xff), uint8_t(data >> 8), uint8_t(data & 0xff) };
 		m_vgm_log->WriteRaw(0xE4, raw, 4);

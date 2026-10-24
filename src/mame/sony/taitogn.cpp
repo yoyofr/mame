@@ -495,9 +495,9 @@ protected:
 		map(0x00300000, 0x0037ffff).rw(m_zoomprog, FUNC(intelfsh16_device::read), FUNC(intelfsh16_device::write));
 
 		// Bank 1 & 3 has access to the 3 samples flashes
-		map(0x08000000, 0x081fffff).mirror(0x10000000).rw(m_wave[0], FUNC(intelfsh16_device::read), FUNC(intelfsh16_device::write));
-		map(0x08200000, 0x083fffff).mirror(0x10000000).rw(m_wave[1], FUNC(intelfsh16_device::read), FUNC(intelfsh16_device::write));
-		map(0x08400000, 0x085fffff).mirror(0x10000000).rw(m_wave[2], FUNC(intelfsh16_device::read), FUNC(intelfsh16_device::write));
+		map(0x08000000, 0x081fffff).mirror(0x10000000).r(m_wave[0], FUNC(intelfsh16_device::read)).w(FUNC(taitogn_state::wave_w<0>));
+		map(0x08200000, 0x083fffff).mirror(0x10000000).r(m_wave[1], FUNC(intelfsh16_device::read)).w(FUNC(taitogn_state::wave_w<1>));
+		map(0x08400000, 0x085fffff).mirror(0x10000000).r(m_wave[2], FUNC(intelfsh16_device::read)).w(FUNC(taitogn_state::wave_w<2>));
 
 		// Bank 2 has access to the sub-bios, the mn102 flash and the bios eprom
 		map(0x10000000, 0x100fffff).rom().region("eprom", 0);
@@ -573,6 +573,13 @@ protected:
 	{
 		// Writes 0 or 1 all the time, it *may* have something to do with
 		// i/o port width, but then maybe not
+	}
+
+	// sample flash writes: the VGM logger dumps the changed chip again at the next key-on
+	template <int N> void wave_w(offs_t offset, uint16_t data)
+	{
+		m_wave[N]->write(offset, data);
+		m_zoom->subdevice<zsg2_device>("zsg2")->vgm_memory_changed(N * 0x200000, 0x200000);
 	}
 
 	uint32_t zsg2_ext_r(offs_t offset)
