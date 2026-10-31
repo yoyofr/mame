@@ -217,7 +217,7 @@ public:
 	VGMDeviceLog* get_vgmlog_dev() const { return m_vgm_log; }
 
 protected:
-	// device-level overrides
+	// device_t implementation
 	virtual void device_start() override ATTR_COLD;
 	virtual const tiny_rom_entry *device_rom_region() const override ATTR_COLD;
 
@@ -249,7 +249,7 @@ public:
 	VGMDeviceLog* get_vgmlog_dev() const { return m_vgm_log; }
 
 protected:
-	// device-level overrides
+	// device_t implementation
 	virtual void device_start() override ATTR_COLD;
 	virtual const tiny_rom_entry *device_rom_region() const override ATTR_COLD;
 
@@ -281,7 +281,7 @@ public:
 	VGMDeviceLog* get_vgmlog_dev() const { return m_vgm_log; }
 
 protected:
-	// device-level overrides
+	// device_t implementation
 	virtual void device_start() override ATTR_COLD;
 	virtual const tiny_rom_entry *device_rom_region() const override ATTR_COLD;
 
@@ -313,7 +313,7 @@ public:
 	VGMDeviceLog* get_vgmlog_dev() const { return m_vgm_log; }
 
 protected:
-	// device-level overrides
+	// device_t implementation
 	virtual void device_start() override ATTR_COLD;
 	virtual const tiny_rom_entry *device_rom_region() const override ATTR_COLD;
 
