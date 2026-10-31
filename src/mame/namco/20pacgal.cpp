@@ -212,7 +212,7 @@ void _20pacgal_state::_20pacgal_map(address_map &map)
 	map(0x44000, 0x447ff).ram().share("video_ram");
 	map(0x44800, 0x45eff).ram();
 	map(0x45040, 0x4505f).w("namco", FUNC(namco_wsg_device::pacman_sound_w));
-	map(0x45f00, 0x45fff).writeonly().share("waveram");
+	map(0x45f00, 0x45fff).w(FUNC(_20pacgal_state::waveram_w)); // wave RAM of the WSG (logged for VGM)
 	map(0x46000, 0x46fff).writeonly().share("char_gfx_ram");
 	map(0x47100, 0x47100).ram(); // leftover from original Galaga code
 	map(0x48000, 0x49fff).bankr("mainbank").w(FUNC(_20pacgal_state::ram_48000_w)); // this should be a mirror of 08000-09fff
@@ -220,6 +220,12 @@ void _20pacgal_state::_20pacgal_map(address_map &map)
 	map(0x4e000, 0x4e17f).w(FUNC(_20pacgal_state::sprite_ram_w));
 	map(0x4e180, 0x4feff).nopw();
 	map(0x4ff00, 0x4ffff).w(FUNC(_20pacgal_state::sprite_lookup_w));
+}
+
+void _20pacgal_state::waveram_w(offs_t offset, uint8_t data)
+{
+	m_waveram[offset] = data;
+	m_namco->vgm_waveram_w(offset, data);
 }
 
 void _20pacgal_state::waveram_map(address_map &map)

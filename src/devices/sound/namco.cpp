@@ -27,6 +27,7 @@
 ***************************************************************************/
 
 #include "emu.h"
+#include "vgmwrite.hpp"
 #include "namco.h"
 
 #include <algorithm>
@@ -50,7 +51,7 @@ void namco_15xx_device::amap(address_map &map)
 
 void namco_cus30_device::amap(address_map &map)
 {
-	map(0x000, 0x0ff).ram().share(m_waveram);
+	map(0x000, 0x0ff).ram().share(m_waveram).w(FUNC(namco_cus30_device::waveram_w));
 	map(0x100, 0x13f).rw(FUNC(namco_cus30_device::cus30_r), FUNC(namco_cus30_device::cus30_w));
 	map(0x140, 0x3ff).ram().share(m_sharedram);
 }
@@ -73,6 +74,7 @@ namco_audio_device<Voices, Packed>::namco_audio_device(const machine_config &mco
 	, m_sample_rate(0)
 	, m_f_fracbits(0)
 	, m_soundregs(nullptr)
+	, m_vgm_log(VGMLogger::GetDummyChip())
 {
 }
 
@@ -98,6 +100,40 @@ namco_cus30_device::namco_cus30_device(const machine_config &mconfig, const char
 	, m_waveram(*this, "waveram")
 	, m_stereo(false)
 {
+}
+
+// VGM logging: open the log, dump the wave data, and on a run-time capture restart log the wave
+// data and every register again
+template <unsigned Voices, bool Packed>
+void namco_audio_device<Voices, Packed>::vgm_start(uint8_t chip_type, unsigned regs)
+{
+	m_vgm_log = machine().vgm_logger().OpenDevice(chip_type, clock());
+	vgm_dump_wave(chip_type);
+	machine().vgm_logger().AddRestartCallback([this, chip_type, regs]() {
+		vgm_dump_wave(chip_type);
+		for (unsigned i = 0; i < regs; i++)
+			m_vgm_log->Write(0x00, i, m_soundregs[i]);
+	});
+}
+
+// the 256 bytes the voices read (wave PROM, or wave RAM): data block 0xC4-0xC7 (RAM write, 16-bit address);
+// the CUS30 wave RAM, empty at power-on, is logged as RAM writes (0xCB) on a restart only
+template <unsigned Voices, bool Packed>
+void namco_audio_device<Voices, Packed>::vgm_dump_wave(uint8_t chip_type)
+{
+	if (!m_vgm_log->IsValid())
+		return;
+	uint8_t wave[0x100];
+	for (int i = 0; i < 0x100; i++)
+		wave[i] = m_data.read_byte(i);
+	if (chip_type == VGMC_NAMCOC30)
+	{
+		if (machine().vgm_logger().Active())
+			for (int i = 0; i < 0x100; i++)
+				m_vgm_log->Write(0x01, i, wave[i]);
+	}
+	else
+		m_vgm_log->WriteLargeData(0x01, 0x100, 0x00, 0x100, wave);
 }
 
 template <unsigned Voices, bool Packed>
@@ -162,6 +198,8 @@ void namco_wsg_device::device_start()
 
 	m_soundregs = make_unique_clear<uint8_t[]>(0x20);
 	save_pointer(NAME(m_soundregs), 0x20);
+
+	vgm_start(VGMC_NAMCOWSG, 0x20);
 }
 
 
@@ -174,6 +212,8 @@ void polepos_wsg_device::device_start()
 
 	m_soundregs = make_unique_clear<uint8_t[]>(0x40);
 	save_pointer(NAME(m_soundregs), 0x40);
+
+	vgm_start(VGMC_NAMCOPPW, 0x40);
 }
 
 
@@ -189,6 +229,8 @@ void namco_15xx_device::device_start()
 
 	m_soundregs = make_unique_clear<uint8_t[]>(0x40);
 	save_pointer(NAME(m_soundregs), 0x40);
+
+	vgm_start(VGMC_NAMCOC15, 0x40);
 }
 
 
@@ -209,6 +251,9 @@ void namco_cus30_device::device_start()
 
 	m_soundregs = make_unique_clear<uint8_t[]>(0x40);
 	save_pointer(NAME(m_soundregs), 0x40);
+
+	vgm_start(VGMC_NAMCOC30, 0x40);
+	m_vgm_log->SetProperty(0x00, m_stereo ? 0x01 : 0x00);
 }
 
 
@@ -296,6 +341,7 @@ void namco_wsg_device::pacman_sound_w(offs_t offset, uint8_t data)
 
 	// set the register
 	m_soundregs[offset] = data;
+	m_vgm_log->Write(0x00, offset, data);
 
 	if (offset < 0x10)
 		ch = (offset - 5) / 5;
@@ -333,6 +379,11 @@ void namco_wsg_device::pacman_sound_w(offs_t offset, uint8_t data)
 		voice.volume[0] = data;
 		break;
 	}
+}
+
+void namco_wsg_device::vgm_waveram_w(offs_t offset, uint8_t data)
+{
+	m_vgm_log->Write(0x01, offset & 0xff, data);
 }
 
 /********************************************************************************/
@@ -386,6 +437,7 @@ void polepos_wsg_device::polepos_sound_w(offs_t offset, uint8_t data)
 
 	// set the register
 	m_soundregs[offset] = data;
+	m_vgm_log->Write(0x00, offset, data);
 
 	const int ch = (offset & 0x1f) >> 2;
 
@@ -455,6 +507,7 @@ void namco_15xx_device::namco_15xx_w(offs_t offset, uint8_t data)
 
 	// set the register
 	m_soundregs[offset] = data;
+	m_vgm_log->Write(0x00, offset, data);
 
 	const int ch = offset >> 3;
 	if (ch >= MAX_VOICES)
@@ -534,6 +587,7 @@ void namco_cus30_device::cus30_w(offs_t offset, uint8_t data)
 
 	// set the register
 	m_soundregs[offset] = data;
+	m_vgm_log->Write(0x00, offset, data);
 
 	const int ch = offset >> 3;
 	if (ch >= MAX_VOICES)
@@ -567,6 +621,12 @@ void namco_cus30_device::cus30_w(offs_t offset, uint8_t data)
 		}
 		break;
 	}
+}
+
+void namco_cus30_device::waveram_w(offs_t offset, uint8_t data)
+{
+	m_waveram[offset] = data;
+	m_vgm_log->Write(0x01, offset, data);
 }
 
 uint8_t namco_cus30_device::cus30_r(offs_t offset)

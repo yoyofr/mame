@@ -5,6 +5,8 @@
 
 #pragma once
 
+class VGMDeviceLog;
+
 
 template <unsigned Voices, bool Packed>
 class namco_audio_device : public device_t,
@@ -76,6 +78,11 @@ protected:
 
 	std::unique_ptr<uint8_t[]> m_soundregs;
 
+	// VGM logging (Namco WSG family of libvgm PR #151): register writes, wave PROM / RAM image
+	VGMDeviceLog *m_vgm_log;
+	void vgm_start(uint8_t chip_type, unsigned regs);
+	void vgm_dump_wave(uint8_t chip_type);
+
 };
 
 class namco_wsg_device : public namco_audio_device<3, false>
@@ -84,6 +91,7 @@ public:
 	namco_wsg_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
 	void pacman_sound_w(offs_t offset, uint8_t data);
+	void vgm_waveram_w(offs_t offset, uint8_t data);   // VGM logging: a board that writes the wave RAM itself (20pacgal)
 
 protected:
 	// device_t implementation
@@ -143,6 +151,7 @@ public:
 
 	uint8_t cus30_r(offs_t offset);
 	void cus30_w(offs_t offset, uint8_t data); // wavedata + sound registers + RAM
+	void waveram_w(offs_t offset, uint8_t data);
 
 	void amap(address_map &map) ATTR_COLD;
 

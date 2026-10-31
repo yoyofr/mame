@@ -626,6 +626,18 @@ void VGMLogger::Stop(void)
 			case VGMC_ICS2115:
 				vh.lngHzICS2115 &= clock_mask;
 				break;
+			case VGMC_NAMCOWSG:
+				vh.lngHzNamcoWSG[0] &= clock_mask;
+				break;
+			case VGMC_NAMCOC15:
+				vh.lngHzNamcoWSG[1] &= clock_mask;
+				break;
+			case VGMC_NAMCOC30:
+				vh.lngHzNamcoWSG[2] &= clock_mask;
+				break;
+			case VGMC_NAMCOPPW:
+				vh.lngHzNamcoWSG[3] &= clock_mask;
+				break;
 			case VGMC_ZSG2:
 				vh.lngHzZSG2 &= clock_mask;
 				vh.lngHzTMS57002 &= clock_mask;
@@ -974,6 +986,18 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 		case VGMC_ICS2115:
 			chip_val = vh.lngHzICS2115;
 			break;
+		case VGMC_NAMCOWSG:
+			chip_val = vh.lngHzNamcoWSG[0];
+			break;
+		case VGMC_NAMCOC15:
+			chip_val = vh.lngHzNamcoWSG[1];
+			break;
+		case VGMC_NAMCOC30:
+			chip_val = vh.lngHzNamcoWSG[2];
+			break;
+		case VGMC_NAMCOPPW:
+			chip_val = vh.lngHzNamcoWSG[3];
+			break;
 		case VGMC_ZSG2:
 			chip_val = vh.lngHzZSG2;
 			break;
@@ -1198,6 +1222,18 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 	case VGMC_ICS2115:
 		vh.lngHzICS2115 = clock;
 		break;
+	case VGMC_NAMCOWSG:
+		vh.lngHzNamcoWSG[0] = clock;
+		break;
+	case VGMC_NAMCOC15:
+		vh.lngHzNamcoWSG[1] = clock;
+		break;
+	case VGMC_NAMCOC30:
+		vh.lngHzNamcoWSG[2] = clock;
+		break;
+	case VGMC_NAMCOPPW:
+		vh.lngHzNamcoWSG[3] = clock;
+		break;
 	case VGMC_ZSG2:
 		vh.lngHzZSG2 = clock;
 		vh.lngHzTMS57002 = ((clock & 0x3FFFFFFF) / 2) | (clock & 0x40000000);	// the DSP of the Taito Zoom board
@@ -1270,6 +1306,12 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 	case VGMC_BSMT2000:
 	case VGMC_ICS2115:
 		Header_SizeCheck(*vfPtr, 0x172, 0x100);
+		break;
+	case VGMC_NAMCOWSG:	// Namco WSG family: clocks at 0x100-0x10C (libvgm PR #151)
+	case VGMC_NAMCOC15:
+	case VGMC_NAMCOC30:
+	case VGMC_NAMCOPPW:
+		Header_SizeCheck(*vfPtr, 0x172, 0x120);
 		break;
 	case VGMC_ZSG2:	// ZSG-2 + TMS57002 (v3 encoding: clocks at 0x110 / 0x118, header 0x120): VGM 1.72
 		Header_SizeCheck(*vfPtr, 0x172, 0x120);
@@ -1619,6 +1661,14 @@ void VGMDeviceLog::SetProperty(uint8_t attr, uint32_t data)
 	case VGMC_BSMT2000:
 		break;
 	case VGMC_ICS2115:
+		break;
+	case VGMC_NAMCOC30:
+		switch(attr)
+		{
+		case 0x00:	// Output (Mono or Stereo)
+			vh.lngHzNamcoWSG[2] = (vh.lngHzNamcoWSG[2] & 0x7FFFFFFF) | (data << 31);
+			break;
+		}
 		break;
 	}
 	
@@ -2183,6 +2233,26 @@ void VGMDeviceLog::Write(uint8_t port, uint16_t r, uint8_t v)
 			break;
 		}
 		break;
+	case VGMC_NAMCOWSG:
+	case VGMC_NAMCOC30:
+		if (port == 0x01)	// wave RAM write: 0xCA (WSG) / 0xCB (C30) aaaa dd, address big endian, bit 15 = chip select
+		{
+			r |= (_chipType & 0x80) << 8;
+			wrtCmd.Data[0x00] = ((_chipType & 0x7F) == VGMC_NAMCOWSG) ? 0xCA : 0xCB;
+			wrtCmd.Data[0x01] = (r & 0xFF00) >> 8;
+			wrtCmd.Data[0x02] = (r & 0x00FF) >> 0;
+			wrtCmd.Data[0x03] = v;
+			wrtCmd.CmdLen = 0x04;
+			break;
+		}
+		[[fallthrough]];
+	case VGMC_NAMCOC15:
+	case VGMC_NAMCOPPW:	// register write: 0x45 / 0x46 / 0x47 / 0x48 aa dd
+		wrtCmd.Data[0x00] = 0x45 + ((_chipType & 0x7F) - VGMC_NAMCOWSG);
+		wrtCmd.Data[0x01] = r | (_chipType & 0x80);
+		wrtCmd.Data[0x02] = v;
+		wrtCmd.CmdLen = 0x03;
+		break;
 	case VGMC_ICS2115:
 		wrtCmd.Data[0x00] = 0x44;
 		wrtCmd.Data[0x01] = r | (_chipType & 0x80);
@@ -2641,6 +2711,13 @@ void VGMDeviceLog::WriteLargeData(uint8_t type, uint32_t blockSize, uint32_t sta
 			break;
 		}
 		break;
+	case VGMC_NAMCOWSG:	// wave PROM / RAM image (RAM write blocks, 16-bit address)
+	case VGMC_NAMCOC15:
+	case VGMC_NAMCOC30:
+	case VGMC_NAMCOPPW:
+		if (type == 0x01)
+			blkType = 0xC4 + ((_chipType & 0x7F) - VGMC_NAMCOWSG);
+		break;
 	case VGMC_ZSG2:
 		blkType = 0x97;	// Type: ZSG-2 ROM Data
 		break;
@@ -2709,8 +2786,8 @@ void VGMDeviceLog::WriteLargeData(uint8_t type, uint32_t blockSize, uint32_t sta
 			doWrite = true;
 			break;
 		case 0xC0:	// RAM Writes
-			if (blkType == 0xC3)
-				doWrite = true;	// save/rewrite this as well
+			if (blkType == 0xC3 || (blkType >= 0xC4 && blkType <= 0xC7))
+				doWrite = true;	// save/rewrite this as well (wave PROM / RAM images)
 			break;
 		}
 		if (doWrite && vf.DataCount < 0x20)

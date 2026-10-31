@@ -32,12 +32,14 @@ public:
 		m_stars_seed(*this, "stars_seed"),
 		m_stars_ctrl(*this, "stars_ctrl"),
 		m_flip(*this, "flip"),
+		m_waveram(*this, "waveram"),
 		m_proms(*this, "proms"),
 		m_mainbank(*this, "mainbank"),
 		m_maincpu(*this, "maincpu"),
 		m_eeprom(*this, "eeprom"),
 		m_palette(*this, "palette"),
 		m_dac(*this, "dac"),
+		m_namco(*this, "namco"),
 		m_rs232(*this, "rs232")
 	{ }
 
@@ -53,6 +55,7 @@ protected:
 	required_shared_ptr<uint8_t> m_stars_seed;
 	required_shared_ptr<uint8_t> m_stars_ctrl;
 	required_shared_ptr<uint8_t> m_flip;
+	required_shared_ptr<uint8_t> m_waveram;
 
 	optional_memory_region m_proms;
 	optional_memory_bank m_mainbank;
@@ -65,6 +68,7 @@ protected:
 	required_device<eeprom_serial_93cxx_device> m_eeprom;
 	required_device<palette_device> m_palette;
 	required_device<dac_8bit_r2r_device> m_dac;
+	required_device<namco_wsg_device> m_namco;
 	required_device<rs232_port_device> m_rs232;
 
 	/* memory */
@@ -101,6 +105,7 @@ protected:
 	void _20pacgal_io_map(address_map &map) ATTR_COLD;
 	void _20pacgal_map(address_map &map) ATTR_COLD;
 	void waveram_map(address_map &map) ATTR_COLD;
+	void waveram_w(offs_t offset, uint8_t data);
 };
 
 

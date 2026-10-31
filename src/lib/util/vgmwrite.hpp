@@ -317,7 +317,11 @@ enum ChipTypes : uint8_t
 	VGMC_BSMT2000	= 0x2E,
 	VGMC_ICS2115	= 0x2F,
 	// v1.72 extension (yoyofr): header grown to 0x110
-	VGMC_ZSG2		= 0x30,	// ZOOM ZSG-2 with the TMS57002 DSP of the Taito Zoom board
+	VGMC_NAMCOWSG	= 0x30,	// Namco WSG family (libvgm PR #151, logging from cam900's mao_vgm branch)
+	VGMC_NAMCOC15	= 0x31,
+	VGMC_NAMCOC30	= 0x32,
+	VGMC_NAMCOPPW	= 0x33,
+	VGMC_ZSG2		= 0x34,	// ZOOM ZSG-2 with the TMS57002 DSP of the Taito Zoom board
 };
 
 #endif // __VGMWRITE_HPP__
