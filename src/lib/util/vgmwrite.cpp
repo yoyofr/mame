@@ -14,6 +14,7 @@
 #include "osdcomm.h"
 #include <wchar.h>
 #include "vgmwrite.hpp"
+#include "vgmv3.h"
 
 #include <string>
 #include <vector>
@@ -395,7 +396,10 @@ void VGMLogger::ResumeRuntime(void)
 	}
 	_paused = false;
 	for (VGMDeviceLog& vc : _chips)
+	{
 		vc._hadWrite = 0x00;
+		vc.V3Reset();	// new file: the player starts from its defaults again
+	}
 	_restarting = true;
 	for (auto& cb : _restartCbs)
 		cb();
@@ -624,6 +628,7 @@ void VGMLogger::Stop(void)
 				break;
 			case VGMC_ZSG2:
 				vh.lngHzZSG2 &= clock_mask;
+				vh.lngHzTMS57002 &= clock_mask;
 				break;
 			}
 		}
@@ -1036,6 +1041,7 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 	vc._hadWrite = 0x00;
 	vc._pcmCache.CacheSize = 0x00;
 	vc._pcmCache.CacheData = nullptr;
+	vc.V3Reset();
 	//printf("Chip Init: chip %p, vgmlog %p, fileID %u, chipID 0x%02X\n", &vc, vc._vgmlog, vc._fileID, vc._chipType);
 	
 	VGM_HEADER& vh = vfPtr->header;
@@ -1194,6 +1200,7 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 		break;
 	case VGMC_ZSG2:
 		vh.lngHzZSG2 = clock;
+		vh.lngHzTMS57002 = ((clock & 0x3FFFFFFF) / 2) | (clock & 0x40000000);	// the DSP of the Taito Zoom board
 		break;
 	}
 	
@@ -1252,7 +1259,9 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 	case VGMC_GA20:
 		Header_SizeCheck(*vfPtr, 0x171, 0x100);
 		break;
-	case VGMC_ES5506:	// ES55xx extension (0xBE/0xD6/0xD7/0xD8/0xE3, ROM block regions): VGM 1.72
+	case VGMC_ES5506:	// ES55xx additions (v3 encoding, header 0x120): VGM 1.72
+		Header_SizeCheck(*vfPtr, 0x172, 0x120);
+		break;
 	case VGMC_MIKEY:
 	case VGMC_K007232:
 	case VGMC_K005289:
@@ -1262,8 +1271,8 @@ VGMDeviceLog* VGMLogger::OpenDevice(uint8_t chipType, int clock)
 	case VGMC_ICS2115:
 		Header_SizeCheck(*vfPtr, 0x172, 0x100);
 		break;
-	case VGMC_ZSG2:	// ZSG-2 + TMS57002 extension (0xE4, ROM block 0x97): VGM 1.72, header 0x110 with the clock at 0x100
-		Header_SizeCheck(*vfPtr, 0x172, 0x110);
+	case VGMC_ZSG2:	// ZSG-2 + TMS57002 (v3 encoding: clocks at 0x110 / 0x118, header 0x120): VGM 1.72
+		Header_SizeCheck(*vfPtr, 0x172, 0x120);
 		break;
 	}
 	
@@ -2079,6 +2088,14 @@ void VGMDeviceLog::Write(uint8_t port, uint16_t r, uint8_t v)
 		switch(port & 0x80)
 		{
 		case 0x00:	// 8-bit register write
+			if (r >= 0x40)	// external bank of voice r - 0x40 (logged by the board): v3 command 0x49 vv bb
+			{
+				wrtCmd.Data[0x00] = 0x49;
+				wrtCmd.Data[0x01] = (r & 0x1F) | (_chipType & 0x80);
+				wrtCmd.Data[0x02] = v;
+				wrtCmd.CmdLen = 0x03;
+				break;
+			}
 			wrtCmd.Data[0x00] = 0xBE;
 			wrtCmd.Data[0x01] = r | (_chipType & 0x80);
 			wrtCmd.Data[0x02] = v;
@@ -2216,6 +2233,90 @@ void VGMDeviceLog::Write(uint8_t port, uint16_t r, uint8_t v)
 	return;
 }
 
+void VGMDeviceLog::V3Reset(void)
+{
+	const uint8_t type = _chipType & 0x7F;
+	if (type == VGMC_ES5506 || type == VGMC_ZSG2)
+	{
+		static const vgmv3::Bytes none;
+		_v3 = std::make_shared<vgmv3::Conv>(none);
+		_v3->es = (type == VGMC_ES5506);
+		_v3->zsg = (type == VGMC_ZSG2);
+	}
+	else
+		_v3.reset();
+	_v3Wired = false;
+}
+
+// write the commands the translation produced (several for an ESP routing preset or a ZSG-2 reset)
+void VGMDeviceLog::V3Emit(void)
+{
+	VGMLogger::VGM_INF& vf = _vgmlog->_files[_fileID];
+	const vgmv3::Bytes& out = _v3->out;
+	for (size_t p = 0; p < out.size(); )
+	{
+		const size_t len = vgmv3::cmd_len(out[p]);
+		if (len == 0 || p + len > out.size())
+			break;
+		if (! vf.WroteHeader)
+		{
+			VGMLogger::VGM_INIT_CMD cmd;
+			cmd.CmdLen = (uint8_t)len;
+			memcpy(cmd.Data, &out[p], len);
+			vf.Commands.push_back(cmd);
+		}
+		else
+		{
+			fwrite(&out[p], 0x01, len, vf.hFile);
+			vf.BytesWrt += len;
+		}
+		p += len;
+	}
+	_v3->out.clear();
+}
+
+// v1 command (opcode + operands, chip select in bit 7 of the first operand) -> v3 commands.
+// Returns false when the opcode is not one of the translated ones.
+bool VGMDeviceLog::V3Raw(uint8_t opcode, const uint8_t* cmd)
+{
+	vgmv3::Conv& cv = *_v3;
+	VGMLogger::VGM_HEADER& vh = _vgmlog->_files[_fileID].header;
+	try
+	{
+		if (cv.zsg && opcode == 0xE4)
+		{
+			if (! _v3Wired)	// Taito Zoom board wiring (ZSG-2 outputs -> DSP inputs), explicit at the start of each file
+			{
+				for (uint8_t i = 0; i < 4; i++)
+					cv.put({0xE2, (uint8_t)(0x36 | (_chipType & 0x80)), i, (uint8_t)(0x34 | (_chipType & 0x80)), i});
+				_v3Wired = true;
+			}
+			cv.zsg_e4(cmd[1], cmd[2], cmd[3], cmd[4]);
+		}
+		else if (cv.es && opcode == 0xD7)
+			cv.es_d7(cmd[1], cmd[2], cmd[3]);
+		else if (cv.es && opcode == 0xD8)
+		{
+			cv.es_d8(cmd[1], cmd[2], cmd[3]);
+			if (cv.espUsed[0] || cv.espUsed[1])	// ES5510 clock (10 MHz on every known board), bit 30 = second ESP
+				vh.lngHzES5510 = 10000000 | (cv.espUsed[1] ? 0x40000000 : 0);
+			vh.bytES5510Dram = cv.dramLog2;
+		}
+		else if (cv.es && opcode == 0xE3)
+			cv.es_e3(cmd[1], cmd[2], cmd[3], cmd[4]);
+		else
+			return false;
+	}
+	catch (const std::exception& e)
+	{
+		cv.out.clear();
+		print_info("VGM Log: command %02X %02X %02X %02X dropped: %s\n", opcode, cmd[1], cmd[2], cmd[3], e.what());
+		return true;
+	}
+	V3Emit();
+	return true;
+}
+
 void VGMDeviceLog::WriteRaw(uint8_t opcode, const uint8_t* data, uint8_t dataLen)
 {
 	// Generic command writer for the extension opcodes (0xD7/0xD8/0xE2/0xE3 ...).
@@ -2239,6 +2340,8 @@ void VGMDeviceLog::WriteRaw(uint8_t opcode, const uint8_t* data, uint8_t dataLen
 	wrtCmd.CmdLen = 0x01 + dataLen;
 	
 	_vgmlog->WriteDelay(vf);
+	if (_v3 && V3Raw(opcode, wrtCmd.Data))
+		return;
 	
 	if (! vf.WroteHeader)
 	{
@@ -2505,9 +2608,8 @@ void VGMDeviceLog::WriteLargeData(uint8_t type, uint32_t blockSize, uint32_t sta
 		}
 		break;
 	case VGMC_ES5506:
-		// "type" tells us the actual region
-		blkType = 0x90;	// Type: ES5506 ROM Data
-		dstart_msb = type << 4;
+		// "type" tells us the actual region: 0 -> block 0x90, 1-3 -> blocks 0x99-0x9B (v3)
+		blkType = (type & 3) ? (0x98 + (type & 3)) : 0x90;	// Type: ES5506 ROM Data
 		break;
 	case VGMC_X1_010:
 		switch(type)

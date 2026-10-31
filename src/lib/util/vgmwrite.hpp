@@ -16,6 +16,9 @@
 #include "../../emu/emu.h"
 #include <wchar.h>
 #include <functional>
+#include <memory>
+
+namespace vgmv3 { struct Conv; }
 
 class VGMLogger;
 
@@ -44,6 +47,10 @@ public:
 private:
 	void SetupPCMCache(uint32_t size);
 	void FlushPCMCache(void);
+	// ES55xx / ZSG-2: the devices log the logical (v1) commands, translated here to the v3 encoding
+	void V3Reset(void);
+	void V3Emit(void);
+	bool V3Raw(uint8_t opcode, const uint8_t* cmd);
 
 	running_machine* _machine;
 	VGMLogger* _vgmlog;
@@ -53,6 +60,8 @@ private:
 	//uint8_t _chipInst;	// chip instance
 	uint8_t _hadWrite;
 	VGM_PCMCACHE _pcmCache;
+	std::shared_ptr<vgmv3::Conv> _v3;	// v1 -> v3 translation state (ESP routing, region map) of the current file
+	bool _v3Wired = false;	// ZSG-2: Taito Zoom board wiring written to the current file
 };
 
 class VGMLogger
@@ -143,9 +152,13 @@ public:
 		uint32_t lngHzBSMT2000;
 		uint32_t lngHzICS2115;
 		
-		uint32_t lngHzZSG2;
-		uint8_t bytReserved2[0x0C];
-	};	// -> 0x110 Bytes
+		uint32_t lngHzNamcoWSG[4];	// 0x100-0x10C: Namco WSG / C15 / C30 / Pole Position (libvgm PR #151)
+		uint32_t lngHzZSG2;		// 0x110
+		uint32_t lngHzES5510;	// 0x114
+		uint32_t lngHzTMS57002;	// 0x118
+		uint8_t bytES5510Dram;	// 0x11C: log2 of the DRAM size in words, 0 = default
+		uint8_t bytReserved2[0x03];
+	};	// -> 0x120 Bytes
 	struct GD3_TAG
 	{
 		uint32_t fccGD3;
